@@ -125,6 +125,11 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
       <button class="primary" id="load">Charger</button>
       <label class="filebtn">Ouvrir un fichier vidéo<input type="file" id="file" accept="video/*"></label>
     </div>
+    <div class="row" style="margin-bottom:.9rem">
+      <label class="inline" style="flex:1 1 360px">Nom de la vidéo
+        <input type="text" id="title" style="flex:1" placeholder="Ex. Module 3 – Order blocks et entrées">
+      </label>
+    </div>
     <div class="player-wrap" id="playerWrap">
       <div id="player"></div>
       <div class="player-empty" id="playerEmpty">La vidéo apparaîtra ici.</div>
@@ -201,7 +206,7 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
 (function () {
   const $ = (id) => document.getElementById(id);
   const E = {
-    url: $("url"), load: $("load"), file: $("file"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"),
+    url: $("url"), load: $("load"), file: $("file"), title: $("title"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"),
     start: $("start"), pause: $("pause"), back: $("back"), fwd: $("fwd"), stop: $("stop"),
     time: $("time"), progress: $("progress"), lang: $("lang"), auto: $("auto"), sens: $("sens"),
     snap: $("snap"), snapInfo: $("snapInfo"), status: $("status"), statusText: $("statusText"), notice: $("notice"),
@@ -252,10 +257,14 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
   function resetPlayer() {
     if (player && player.destroy) { try { player.destroy(); } catch (e) {} }
     player = null; playerReady = false; E.start.disabled = true; directReadable = null;
+    E.title.value = ""; E.title.placeholder = "Ex. Module 3 – Order blocks et entrées";
     E.playerWrap.querySelectorAll("iframe, video, #player").forEach(n => n.remove());
     const d = document.createElement("div"); d.id = "player"; E.playerWrap.prepend(d);
   }
-  function ready() { playerReady = true; E.start.disabled = false; setStatus("Prêt"); }
+  function ready() {
+    playerReady = true; E.start.disabled = false; setStatus("Prêt");
+    if (!E.title.value.trim()) { try { const t = player.getVideoData().title; if (t && t !== nativeTitle) E.title.value = t; } catch (e) {} }
+  }
 
   // Native <video> wrapped with the same method names as the YouTube player
   function nativePlayer(src) {
@@ -314,7 +323,7 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
     } else {
       try { new URL(raw); } catch (e) { notice("Lien non reconnu. Collez un lien YouTube ou un lien complet vers une vidéo (https://…/video.mp4)."); return; }
       nativeTitle = titleFromName(new URL(raw).pathname);
-      resetPlayer(); E.playerEmpty.hidden = true;
+      resetPlayer(); E.playerEmpty.hidden = true; E.title.placeholder = "Donnez un nom à cette vidéo (sinon : " + nativeTitle + ")"; E.title.focus();
       player = nativePlayer(raw);
     }
   };
@@ -322,11 +331,14 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
     const f = E.file.files && E.file.files[0]; if (!f) return;
     if (session) { toast("Terminez d'abord l'analyse en cours."); E.file.value = ""; return; }
     notice(""); videoUrl = "Fichier local : " + f.name; nativeTitle = titleFromName(f.name);
-    resetPlayer(); E.playerEmpty.hidden = true;
+    resetPlayer(); E.playerEmpty.hidden = true; E.title.value = nativeTitle;
     player = nativePlayer(URL.createObjectURL(f));
     E.file.value = "";
   };
-  function videoTitle() { try { return player.getVideoData().title || "Tuto"; } catch (e) { return "Tuto"; } }
+  function videoTitle() {
+    const typed = E.title.value.trim(); if (typed) return typed;
+    try { return player.getVideoData().title || "Tuto"; } catch (e) { return "Tuto"; }
+  }
   function now() { try { return player.getCurrentTime() || 0; } catch (e) { return 0; } }
   function isPlaying() { try { return player.getPlayerState() === PS.PLAYING; } catch (e) { return false; } }
 
