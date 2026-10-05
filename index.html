@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Capteur de tuto auto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root {
+  --bg: #E9EDF1; --panel: #FFFFFF; --ink: #18222F; --muted: #5B6B80; --line: #CDD5DE;
+  --rec: #C8312B; --mark: #F2C94C; --btn: #18222F; --btn-ink: #FFFFFF; --focus: #2F6FD0;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121A24; --panel: #1B2532; --ink: #E6ECF2; --muted: #93A3B6; --line: #2E3B4B;
+    --rec: #FF5A4E; --btn: #E6ECF2; --btn-ink: #121A24; --focus: #7FB0FF;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121A24; --panel: #1B2532; --ink: #E6ECF2; --muted: #93A3B6; --line: #2E3B4B;
+  --rec: #FF5A4E; --btn: #E6ECF2; --btn-ink: #121A24; --focus: #7FB0FF;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+h1 { font-family: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; font-weight: 800; font-size: clamp(1.9rem, 5vw, 2.8rem); line-height: 1; letter-spacing: -0.02em; margin: 0; }
+h2 { font-family: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; font-weight: 800; font-size: 1.25rem; margin: 0 0 .7rem; }
+h2 .n { color: var(--muted); font-weight: 500; }
+.status { display: flex; align-items: center; gap: .5rem; font-weight: 700; color: var(--muted); }
+.dot { width: .8rem; height: .8rem; border-radius: 50%; background: var(--line); }
+.status.on { color: var(--rec); }
+.status.on .dot { background: var(--rec); animation: pulse 1.4s ease-in-out infinite; }
+.status.done { color: var(--ink); }
+.status.done .dot { background: #2E9B5B; }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .status.on .dot { animation: none; } }
+
+section { background: var(--panel); border: 1.5px solid var(--line); border-radius: 12px; padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+.hint { color: var(--muted); font-size: .95rem; max-width: 75ch; margin: .1rem 0 .8rem; }
+.row { display: flex; flex-wrap: wrap; gap: .7rem; align-items: center; }
+input[type=url], input[type=text], textarea, select, button {
+  font: inherit; color: var(--ink); background: var(--panel); border: 1.5px solid var(--line); border-radius: 8px; padding: .55rem .8rem;
+}
+input[type=url] { flex: 1 1 360px; }
+textarea { width: 100%; min-height: 150px; resize: vertical; }
+button { cursor: pointer; }
+button.primary { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); font-weight: 700; }
+button.stop { background: var(--rec); border-color: var(--rec); color: #fff; font-weight: 700; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+label.inline { display: flex; align-items: center; gap: .45rem; color: var(--muted); }
+input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: var(--btn); }
+
+.player-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 10px; overflow: hidden; }
+.player-wrap > div, .player-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.player-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #93A3B6; text-align: center; padding: 1rem; }
+.transport { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: .8rem; }
+.time { font-family: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; font-weight: 800; font-size: 1.6rem; font-variant-numeric: tabular-nums; margin-left: auto; }
+.time small { color: var(--muted); font-weight: 500; font-size: 1rem; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; margin-top: .7rem; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--rec); }
+
+.notice { border-left: 4px solid var(--rec); background: var(--panel); padding: .8rem 1rem; border-radius: 0 8px 8px 0; margin-bottom: 1rem; }
+.notice[hidden] { display: none; }
+
+.work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 1rem; }
+.work section { margin-bottom: 0; }
+.scroll { height: 460px; overflow-y: auto; }
+.seg { display: grid; grid-template-columns: 4.6rem 1fr; gap: .6rem; padding: .3rem 0; }
+.seg button.t { border: none; background: none; padding: 0; color: var(--muted); font-variant-numeric: tabular-nums; font-size: .9rem; text-align: left; text-decoration: underline; text-decoration-color: var(--line); }
+.seg p { margin: 0; }
+.interim p { display: inline; background: var(--mark); color: #18222F; padding: .05rem .3rem; border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.empty { color: var(--muted); }
+
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .8rem; }
+.shot { border: 1.5px solid var(--line); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.shot img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: #000; cursor: zoom-in; }
+.shot .meta { display: flex; justify-content: space-between; align-items: center; padding: .35rem .55rem 0; }
+.shot .meta button { border: none; background: none; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.shot .del { color: var(--muted) !important; font-weight: 400 !important; font-size: .9rem; text-decoration: underline; }
+.shot input { margin: .35rem .55rem .55rem; border-radius: 6px; padding: .35rem .5rem; font-size: .92rem; }
+.flash { animation: flash .5s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 5px var(--mark); } to { box-shadow: 0 0 0 0 transparent; } }
+
+dialog { border: none; padding: 0; background: transparent; max-width: 95vw; max-height: 92vh; }
+dialog img { max-width: 95vw; max-height: 92vh; display: block; border-radius: 6px; }
+dialog::backdrop { background: rgba(10, 15, 22, .85); }
+.toast { color: var(--muted); }
+
+@media (max-width: 860px) { .work { grid-template-columns: 1fr; } .scroll { height: 340px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Capteur de tuto auto</h1>
+    <div class="status" id="status" role="status"><span class="dot"></span><span id="statusText">En attente d'une vidéo</span></div>
+  </header>
+
+  <div class="notice" id="notice" hidden></div>
+
+  <section>
+    <h2><span class="n">1 ·</span> La vidéo</h2>
+    <div class="row" style="margin-bottom:.9rem">
+      <input type="url" id="url" placeholder="Collez le lien YouTube du tuto">
+      <button class="primary" id="load">Charger</button>
+    </div>
+    <div class="player-wrap" id="playerWrap">
+      <div id="player"></div>
+      <div class="player-empty" id="playerEmpty">La vidéo apparaîtra ici.</div>
+    </div>
+    <div class="transport">
+      <button class="primary" id="start" disabled>Démarrer l'analyse</button>
+      <button id="pause" disabled>Pause</button>
+      <button id="back" disabled>−10 s</button>
+      <button id="fwd" disabled>+10 s</button>
+      <button id="stop" disabled>Terminer</button>
+      <span class="time" id="time">00:00:00 <small>/ 00:00:00</small></span>
+    </div>
+    <div class="bar"><i id="progress"></i></div>
+    <div class="row" style="margin-top:.9rem">
+      <label class="inline">Langue
+        <select id="lang">
+          <option value="fr-FR">Français</option><option value="en-US">Anglais (US)</option><option value="en-GB">Anglais (UK)</option>
+          <option value="es-ES">Espagnol</option><option value="de-DE">Allemand</option><option value="it-IT">Italien</option>
+        </select>
+      </label>
+      <label class="inline">Vitesse
+        <select id="rate"><option value="1">×1 (conseillé)</option><option value="1.25">×1,25</option><option value="1.5">×1,5</option></select>
+      </label>
+      <label class="inline"><input type="checkbox" id="auto" checked> Captures automatiques</label>
+      <label class="inline">Sensibilité
+        <select id="sens"><option value="12">Faible</option><option value="6" selected>Moyenne</option><option value="3">Forte</option></select>
+      </label>
+      <button id="snap" disabled>Capturer maintenant</button>
+      <span class="toast" id="snapInfo"></span>
+    </div>
+    <p class="hint" style="margin-top:.8rem">Au démarrage, Chrome demande de partager cet onglet : laissez « Partager aussi l'audio de l'onglet » coché. Restez sur cet onglet pendant l'analyse et ne passez pas la souris sur la vidéo. L'audio est transcrit par le service de reconnaissance vocale du navigateur ; les captures restent sur votre ordinateur.</p>
+  </section>
+
+  <div class="work">
+    <section>
+      <h2><span class="n">2 ·</span> Transcription automatique</h2>
+      <div class="scroll" id="tscroll">
+        <p class="empty" id="tEmpty">Le texte s'affichera ici pendant la lecture.</p>
+        <div id="lines"></div>
+        <div class="seg interim" id="interimRow" hidden><span class="t" id="interimTime" style="color:var(--muted);font-size:.9rem"></span><div><p id="interim"></p></div></div>
+      </div>
+    </section>
+    <section>
+      <h2><span class="n">3 ·</span> Captures <span class="n" id="count">(0)</span></h2>
+      <div class="scroll">
+        <p class="empty" id="sEmpty">Les captures du graphique s'afficheront ici. Ajoutez une note aux plus importantes.</p>
+        <div class="shots" id="shots"></div>
+      </div>
+    </section>
+  </div>
+
+  <section style="margin-top:1rem">
+    <h2><span class="n">4 ·</span> Transcription YouTube <span class="n">(facultatif, recommandé)</span></h2>
+    <p class="hint">Plus fiable que la transcription automatique. Sur YouTube : « …plus » sous la vidéo › « Afficher la transcription », sélectionnez tout le panneau et collez-le ici.</p>
+    <textarea id="ytTranscript" placeholder="0:00&#10;Bonjour à tous…"></textarea>
+  </section>
+
+  <section>
+    <h2><span class="n">5 ·</span> Export</h2>
+    <div class="row">
+      <button class="primary" id="export">Exporter le dossier (.zip)</button>
+      <label class="inline"><input type="checkbox" id="autoExport" checked> Exporter automatiquement à la fin de la vidéo</label>
+      <button id="reset">Tout effacer</button>
+      <span class="toast" id="toast" aria-live="polite"></span>
+    </div>
+    <p class="hint" style="margin-top:.8rem">Envoyez le .zip à Claude en précisant les concepts ICT à transformer en skills.</p>
+  </section>
+</div>
+
+<dialog id="viewer"><img id="viewerImg" alt=""></dialog>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const E = {
+    url: $("url"), load: $("load"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"),
+    start: $("start"), pause: $("pause"), back: $("back"), fwd: $("fwd"), stop: $("stop"),
+    time: $("time"), progress: $("progress"), lang: $("lang"), rate: $("rate"), auto: $("auto"), sens: $("sens"),
+    snap: $("snap"), snapInfo: $("snapInfo"), status: $("status"), statusText: $("statusText"), notice: $("notice"),
+    tscroll: $("tscroll"), tEmpty: $("tEmpty"), lines: $("lines"), interimRow: $("interimRow"), interimTime: $("interimTime"), interim: $("interim"),
+    shots: $("shots"), sEmpty: $("sEmpty"), count: $("count"), ytTranscript: $("ytTranscript"),
+    exportBtn: $("export"), autoExport: $("autoExport"), reset: $("reset"), toast: $("toast"), viewer: $("viewer"), viewerImg: $("viewerImg")
+  };
+
+  // ---------- helpers ----------
+  function fmt(sec, sep) {
+    sep = sep || ":"; const s = Math.max(0, Math.floor(sec || 0));
+    return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, "0")).join(sep);
+  }
+  function notice(msg) { E.notice.textContent = msg || ""; E.notice.hidden = !msg; }
+  function toast(msg, el) { el = el || E.toast; el.textContent = msg; clearTimeout(el._t); el._t = setTimeout(() => el.textContent = "", 3500); }
+  function setStatus(text, mode) { E.statusText.textContent = text; E.status.className = "status" + (mode ? " " + mode : ""); }
+  function parseId(u) {
+    try {
+      const url = new URL(u.trim());
+      if (url.hostname.includes("youtu.be")) return { id: url.pathname.slice(1, 12), t: url.searchParams.get("t") };
+      if (url.searchParams.get("v")) return { id: url.searchParams.get("v"), t: url.searchParams.get("t") };
+      const m = url.pathname.match(/\/(embed|shorts|live)\/([\w-]{11})/);
+      if (m) return { id: m[2], t: url.searchParams.get("t") };
+    } catch (e) {}
+    const m = String(u).match(/^[\w-]{11}$/); return m ? { id: m[0] } : null;
+  }
+
+  if (location.protocol === "file:") {
+    notice("Cette page est ouverte depuis un fichier : YouTube refusera de lire la vidéo (erreur 153). Mettez-la en ligne (GitHub Pages) et ouvrez-la depuis son adresse https://…");
+  }
+
+  // ---------- YouTube player ----------
+  let player = null, playerReady = false, videoUrl = "";
+  let ytApi = new Promise((resolve) => {
+    window.onYouTubeIframeAPIReady = resolve;
+    const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api";
+    s.onerror = () => notice("Impossible de charger le lecteur YouTube. Vérifiez votre connexion ou un bloqueur de publicités.");
+    document.head.appendChild(s);
+  });
+
+  E.load.onclick = async () => {
+    const parsed = parseId(E.url.value);
+    if (!parsed) { notice("Lien YouTube non reconnu. Exemple : https://www.youtube.com/watch?v=XXXXXXXXXXX"); return; }
+    notice(""); videoUrl = E.url.value.trim();
+    await ytApi;
+    const startAt = parsed.t ? parseInt(parsed.t, 10) || 0 : 0;
+    if (player && playerReady) { player.cueVideoById({ videoId: parsed.id, startSeconds: startAt }); return; }
+    E.playerEmpty.hidden = true;
+    player = new YT.Player("player", {
+      videoId: parsed.id,
+      playerVars: { controls: 0, disablekb: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0, fs: 0, start: startAt, origin: location.origin },
+      events: {
+        onReady: () => { playerReady = true; E.start.disabled = false; setStatus("Prêt"); },
+        onStateChange: onState,
+        onError: (e) => notice("Le lecteur YouTube a renvoyé l'erreur " + e.data + ". La vidéo est peut-être privée ou son intégration désactivée par son auteur.")
+      }
+    });
+  };
+  function videoTitle() { try { return player.getVideoData().title || "Tuto"; } catch (e) { return "Tuto"; } }
+  function now() { try { return player.getCurrentTime() || 0; } catch (e) { return 0; } }
+  function isPlaying() { try { return player.getPlayerState() === YT.PlayerState.PLAYING; } catch (e) { return false; } }
+
+  function onState(e) {
+    if (!session) return;
+    if (e.data === YT.PlayerState.PLAYING) { setStatus("Analyse en cours", "on"); E.pause.textContent = "Pause"; }
+    else if (e.data === YT.PlayerState.PAUSED) { setStatus("En pause"); E.pause.textContent = "Reprendre"; }
+    else if (e.data === YT.PlayerState.ENDED) finish(true);
+  }
+  E.pause.onclick = () => { if (!player) return; isPlaying() ? player.pauseVideo() : player.playVideo(); };
+  E.back.onclick = () => player && player.seekTo(Math.max(0, now() - 10), true);
+  E.fwd.onclick = () => player && player.seekTo(now() + 10, true);
+  E.rate.onchange = () => { try { player.setPlaybackRate(parseFloat(E.rate.value)); } catch (e) {} };
+
+  // ---------- session: tab capture + speech ----------
+  let session = false, stream = null, vTrack = null, aTrack = null, imageCapture = null, cropped = false;
+  const hiddenVideo = document.createElement("video"); hiddenVideo.muted = true; hiddenVideo.playsInline = true;
+
+  E.start.onclick = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { notice("Ce navigateur ne permet pas la capture. Utilisez Chrome ou Edge sur ordinateur, à jour."); return; }
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser", frameRate: 5 },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false },
+        preferCurrentTab: true, selfBrowserSurface: "include", surfaceSwitching: "exclude", systemAudio: "exclude"
+      });
+    } catch (e) {
+      if (e && e.name !== "NotAllowedError") notice("Capture impossible : " + e.message);
+      return;
+    }
+    vTrack = stream.getVideoTracks()[0];
+    aTrack = stream.getAudioTracks()[0] || null;
+    const surface = (vTrack.getSettings && vTrack.getSettings().displaySurface) || "";
+    if (surface && surface !== "browser") notice("Vous avez partagé un écran ou une fenêtre au lieu de cet onglet. Les captures risquent d'être décalées : relancez en choisissant « Cet onglet ».");
+    cropped = false;
+    if ("CropTarget" in window && vTrack.cropTo) {
+      try { await vTrack.cropTo(await CropTarget.fromElement(E.playerWrap)); cropped = true; } catch (e) {}
+    }
+    imageCapture = ("ImageCapture" in window) ? new ImageCapture(vTrack) : null;
+    hiddenVideo.srcObject = new MediaStream([vTrack]);
+    try { await hiddenVideo.play(); } catch (e) {}
+    vTrack.addEventListener("ended", () => finish(false));
+
+    session = true; segStart = null;
+    if (!aTrack) notice("Pas d'audio partagé : la transcription automatique est désactivée. Pour l'activer, relancez en laissant « Partager aussi l'audio de l'onglet » coché.");
+    else startSpeech();
+
+    try { player.unMute(); player.setVolume(100); player.setPlaybackRate(parseFloat(E.rate.value)); } catch (e) {}
+    player.playVideo();
+    E.start.disabled = true; E.load.disabled = true; E.url.disabled = true; E.lang.disabled = true;
+    [E.pause, E.back, E.fwd, E.stop, E.snap].forEach(b => b.disabled = false);
+    E.stop.className = "stop";
+    setStatus("Analyse en cours", "on");
+  };
+  E.stop.onclick = () => { try { player.pauseVideo(); } catch (e) {} finish(false); };
+
+  function finish(ended) {
+    if (!session) return;
+    session = false;
+    stopSpeech();
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = vTrack = aTrack = imageCapture = null; hiddenVideo.srcObject = null;
+    E.start.disabled = !playerReady; E.load.disabled = false; E.url.disabled = false; E.lang.disabled = false;
+    E.start.textContent = "Reprendre l'analyse";
+    [E.pause, E.back, E.fwd, E.stop, E.snap].forEach(b => b.disabled = true);
+    E.stop.className = "";
+    setStatus(ended ? "Vidéo terminée" : "Analyse arrêtée", "done");
+    if (ended && E.autoExport.checked && (shots.length || segments.length)) exportZip();
+  }
+
+  // ---------- speech recognition on the tab's audio ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, segStart = null, lastRestart = 0, restarts = 0;
+  const segments = [];
+  function startSpeech() {
+    if (!SR) { notice("La reconnaissance vocale n'est pas disponible dans ce navigateur : utilisez Chrome ou Edge à jour. Les captures fonctionnent quand même."); return; }
+    recog = new SR();
+    recog.lang = E.lang.value; recog.continuous = true; recog.interimResults = true;
+    recog.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i], txt = r[0].transcript.trim();
+        if (segStart === null) segStart = now();
+        if (r.isFinal) { if (txt) addSegment({ t: segStart, text: txt.charAt(0).toUpperCase() + txt.slice(1) }); segStart = null; }
+        else interim += (interim ? " " : "") + txt;
+      }
+      E.interim.textContent = interim; E.interimTime.textContent = segStart !== null ? fmt(segStart) : "";
+      E.interimRow.hidden = !interim; E.tEmpty.hidden = true; scrollT();
+    };
+    recog.onerror = (ev) => {
+      if (ev.error === "no-speech" || ev.error === "aborted") return;
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") notice("La reconnaissance vocale a été refusée par le navigateur. Vérifiez qu'il est à jour (Chrome ou Edge récents) et que la page est bien ouverte en https.");
+      else if (ev.error === "network") notice("Connexion au service de reconnaissance perdue, nouvelle tentative…");
+      else if (ev.error === "language-not-supported") notice("Langue non prise en charge par le navigateur.");
+      else notice("Reconnaissance vocale : " + ev.error);
+    };
+    recog.onend = () => {
+      if (E.interim.textContent) { addSegment({ t: segStart ?? now(), text: E.interim.textContent }); E.interim.textContent = ""; E.interimRow.hidden = true; }
+      segStart = null;
+      if (!session || !aTrack || aTrack.readyState !== "live") return;
+      const t = Date.now(); restarts = (t - lastRestart < 2000) ? restarts + 1 : 0; lastRestart = t;
+      setTimeout(() => { if (session) startSpeech(); }, restarts > 3 ? 1500 : 150);
+    };
+    try { recog.start(aTrack); }
+    catch (e) { notice("Impossible de lancer la transcription sur l'audio de l'onglet. Mettez Chrome ou Edge à jour. (" + e.message + ")"); }
+  }
+  function stopSpeech() { if (recog) { const r = recog; recog = null; r.onend = null; try { r.stop(); } catch (e) {} } E.interimRow.hidden = true; }
+  function addSegment(seg) {
+    segments.push(seg);
+    const row = document.createElement("div"); row.className = "seg";
+    const b = document.createElement("button"); b.className = "t"; b.textContent = fmt(seg.t); b.title = "Aller à ce moment";
+    b.onclick = () => player && player.seekTo(seg.t, true);
+    const p = document.createElement("p"); p.textContent = seg.text;
+    const d = document.createElement("div"); d.appendChild(p);
+    row.append(b, d); E.lines.appendChild(row); E.tEmpty.hidden = true; scrollT();
+  }
+  let stickT = true;
+  E.tscroll.addEventListener("scroll", () => { const s = E.tscroll; stickT = s.scrollHeight - s.scrollTop - s.clientHeight < 40; });
+  function scrollT() { if (stickT) E.tscroll.scrollTop = E.tscroll.scrollHeight; }
+
+  // ---------- frame capture ----------
+  const small = document.createElement("canvas"); small.width = 96; small.height = 54;
+  const sctx = small.getContext("2d", { willReadFrequently: true });
+  const big = document.createElement("canvas"); const bctx = big.getContext("2d");
+  let prevSig = null, lastShotSig = null, lastShotWall = 0, busy = false;
+  const shots = []; let seq = 0;
+
+  async function grab() {
+    if (!vTrack || vTrack.readyState !== "live") return null;
+    if (imageCapture) { try { return await imageCapture.grabFrame(); } catch (e) {} }
+    return hiddenVideo.videoWidth ? hiddenVideo : null;
+  }
+  // Source rectangle of the player inside the frame (whole frame when cropped by the browser)
+  function region(src) {
+    const w = src.videoWidth || src.width, h = src.videoHeight || src.height;
+    if (cropped) return [0, 0, w, h];
+    const r = E.playerWrap.getBoundingClientRect();
+    const sx = w / window.innerWidth, sy = h / window.innerHeight;
+    return [Math.max(0, r.left * sx), Math.max(0, r.top * sy), Math.min(w, r.width * sx), Math.min(h, r.height * sy)];
+  }
+  function signature(src) {
+    const [x, y, w, h] = region(src);
+    sctx.drawImage(src, x, y, w, h, 0, 0, 96, 54);
+    const d = sctx.getImageData(0, 0, 96, 54).data, out = new Uint8Array(96 * 54);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) out[j] = (d[i] * 3 + d[i + 1] * 6 + d[i + 2]) / 10;
+    return out;
+  }
+  function diff(a, b) { if (!a || !b) return 255; let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
+
+  async function takeShot(src, sig, isAuto) {
+    const [x, y, w, h] = region(src);
+    const scale = Math.min(1, 1920 / w);
+    big.width = Math.round(w * scale); big.height = Math.round(h * scale);
+    bctx.drawImage(src, x, y, w, h, 0, 0, big.width, big.height);
+    const blob = await new Promise(r => big.toBlob(r, "image/jpeg", 0.9));
+    if (!blob) return;
+    const shot = { id: ++seq, t: now(), blob, url: URL.createObjectURL(blob), note: "", auto: isAuto };
+    shots.push(shot); lastShotSig = sig; lastShotWall = Date.now();
+    renderShot(shot); updateCount();
+    E.playerWrap.classList.remove("flash"); void E.playerWrap.offsetWidth; E.playerWrap.classList.add("flash");
+    toast((isAuto ? "Capture auto à " : "Capture à ") + fmt(shot.t), E.snapInfo);
+  }
+  function renderShot(shot) {
+    const card = document.createElement("div"); card.className = "shot";
+    const img = document.createElement("img"); img.src = shot.url; img.alt = "Capture à " + fmt(shot.t);
+    img.onclick = () => { E.viewerImg.src = shot.url; E.viewer.showModal(); };
+    const meta = document.createElement("div"); meta.className = "meta";
+    const tb = document.createElement("button"); tb.textContent = fmt(shot.t); tb.title = "Aller à ce moment"; tb.onclick = () => player && player.seekTo(shot.t, true);
+    const del = document.createElement("button"); del.className = "del"; del.textContent = "Supprimer";
+    del.onclick = () => { const i = shots.indexOf(shot); if (i > -1) shots.splice(i, 1); URL.revokeObjectURL(shot.url); card.remove(); updateCount(); };
+    meta.append(tb, del);
+    const note = document.createElement("input"); note.type = "text"; note.placeholder = "Note (ex. FVG haussier)"; note.oninput = () => shot.note = note.value;
+    card.append(img, meta, note); E.shots.appendChild(card);
+  }
+  function updateCount() { E.count.textContent = "(" + shots.length + ")"; E.sEmpty.hidden = shots.length > 0; }
+  E.viewer.onclick = () => E.viewer.close();
+  E.snap.onclick = async () => { const src = await grab(); if (src) await takeShot(src, signature(src), false); };
+
+  async function tick() {
+    if (player && playerReady) {
+      const cur = now(); let dur = 0; try { dur = player.getDuration() || 0; } catch (e) {}
+      E.time.innerHTML = fmt(cur) + " <small>/ " + fmt(dur) + "</small>";
+      E.progress.style.width = dur ? (100 * cur / dur).toFixed(2) + "%" : "0";
+    }
+    if (!session || busy || !E.auto.checked || !isPlaying()) return;
+    busy = true;
+    try {
+      const src = await grab(); if (!src) return;
+      const sig = signature(src);
+      const stable = diff(sig, prevSig) < 2.5; prevSig = sig;
+      if (stable && diff(sig, lastShotSig) > parseFloat(E.sens.value) && Date.now() - lastShotWall > 4000) await takeShot(src, sig, true);
+    } finally { busy = false; }
+  }
+  let ticked = false, fallback = null;
+  const startFallback = () => { if (!fallback) fallback = setInterval(tick, 1000); };
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob(["setInterval(()=>postMessage(0),1000)"], { type: "text/javascript" })));
+    w.onmessage = () => { ticked = true; tick(); }; w.onerror = startFallback;
+  } catch (e) { startFallback(); }
+  setTimeout(() => { if (!ticked) startFallback(); }, 2500);
+
+  // ---------- export ----------
+  function slug(s) { return (s || "tuto").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 60) || "tuto"; }
+  async function exportZip() {
+    if (!shots.length && !segments.length && !E.ytTranscript.value.trim()) { toast("Rien à exporter pour l'instant."); return; }
+    if (typeof JSZip === "undefined") { notice("La bibliothèque d'export n'a pas pu se charger. Vérifiez votre connexion."); return; }
+    E.exportBtn.disabled = true; toast("Préparation du fichier…");
+    try {
+      const zip = new JSZip(), title = videoTitle();
+      const sortedShots = shots.slice().sort((a, b) => a.t - b.t);
+      const names = new Map();
+      sortedShots.forEach((s, i) => { const n = String(i + 1).padStart(3, "0") + "_" + fmt(s.t, "-") + ".jpg"; names.set(s, n); zip.file("captures/" + n, s.blob); });
+
+      const idx = ["# " + title, "", "- Vidéo : " + (videoUrl || "non renseignée"), "- Exporté le : " + new Date().toLocaleString("fr-FR"),
+        "- Captures : " + sortedShots.length + " · segments transcrits : " + segments.length, "",
+        "Fichiers : chronologie.md (transcription et captures mêlées dans l'ordre de la vidéo), transcription-auto.txt, transcription-youtube.txt (si fournie), captures/.", "",
+        "## Captures", "", "| # | Temps | Fichier | Note |", "|---|---|---|---|"];
+      sortedShots.forEach((s, i) => idx.push("| " + (i + 1) + " | " + fmt(s.t) + " | captures/" + names.get(s) + " | " + (s.note || "").replace(/\|/g, "/") + (s.auto ? "" : " (manuelle)") + " |"));
+      zip.file("index.md", idx.join("\n"));
+
+      const events = segments.map(s => ({ t: s.t, k: 0, line: "**[" + fmt(s.t) + "]** " + s.text }))
+        .concat(sortedShots.map(s => ({ t: s.t, k: 1, line: "\n> 📸 **Capture " + names.get(s) + "** à " + fmt(s.t) + (s.note ? " — " + s.note : "") + "\n> ![](captures/" + names.get(s) + ")\n" })))
+        .sort((a, b) => a.t - b.t || a.k - b.k);
+      zip.file("chronologie.md", "# Chronologie — " + title + "\n\n" + events.map(e => e.line).join("\n"));
+      zip.file("transcription-auto.txt", segments.map(s => "[" + fmt(s.t) + "] " + s.text).join("\n") || "(aucune)");
+      if (E.ytTranscript.value.trim()) zip.file("transcription-youtube.txt", E.ytTranscript.value.trim());
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = slug(title) + ".zip";
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast("Dossier exporté.");
+    } catch (e) { notice("L'export a échoué : " + e.message); }
+    finally { E.exportBtn.disabled = false; }
+  }
+  E.exportBtn.onclick = exportZip;
+
+  E.reset.onclick = () => {
+    if (session) { toast("Terminez d'abord l'analyse."); return; }
+    if (!confirm("Effacer la transcription et les captures ?")) return;
+    shots.forEach(s => URL.revokeObjectURL(s.url)); shots.length = 0; segments.length = 0;
+    E.shots.textContent = ""; E.lines.textContent = ""; E.tEmpty.hidden = false; E.ytTranscript.value = "";
+    lastShotSig = null; E.start.textContent = "Démarrer l'analyse"; updateCount(); toast("Tout est effacé.");
+  };
+  window.addEventListener("beforeunload", (e) => { if (shots.length || segments.length) { e.preventDefault(); e.returnValue = ""; } });
+  updateCount();
+})();
+</script>
+</body>
+</html>
