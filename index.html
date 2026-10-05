@@ -156,7 +156,7 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
       <button id="snap" disabled>Capturer maintenant</button>
       <span class="toast" id="snapInfo"></span>
     </div>
-    <p class="hint" style="margin-top:.8rem">Au démarrage, Chrome demande de partager cet onglet : laissez « Partager aussi l'audio de l'onglet » coché. Restez sur cet onglet pendant l'analyse et ne passez pas la souris sur la vidéo. L'audio est transcrit par le service de reconnaissance vocale du navigateur ; les captures restent sur votre ordinateur.</p>
+    <p class="hint" style="margin-top:.8rem">Au démarrage, Chrome demande de partager cet onglet : laissez « Partager aussi l'audio de l'onglet » coché. Restez sur cet onglet pendant l'analyse. Pour les vidéos YouTube, gardez la vidéo entièrement visible à l'écran et ne passez pas la souris dessus ; pour les liens directs et les fichiers, vous pouvez faire défiler librement. L'audio est transcrit par le service de reconnaissance vocale du navigateur ; les captures restent sur votre ordinateur.</p>
   </section>
 
   <div class="work">
@@ -235,6 +235,7 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
 
   // ---------- players: YouTube or direct video file ----------
   const PS = { ENDED: 0, PLAYING: 1, PAUSED: 2 };
+  let directReadable = null;
   let player = null, playerReady = false, videoUrl = "", nativeTitle = "";
   let ytApi = null;
   function loadYtApi() {
@@ -250,7 +251,7 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
   function isYoutube(u) { try { return /(^|\.)youtube\.com$|(^|\.)youtu\.be$|youtube-nocookie\.com$/.test(new URL(u).hostname); } catch (e) { return /^[\w-]{11}$/.test(u.trim()); } }
   function resetPlayer() {
     if (player && player.destroy) { try { player.destroy(); } catch (e) {} }
-    player = null; playerReady = false; E.start.disabled = true;
+    player = null; playerReady = false; E.start.disabled = true; directReadable = null;
     E.playerWrap.querySelectorAll("iframe, video, #player").forEach(n => n.remove());
     const d = document.createElement("div"); d.id = "player"; E.playerWrap.prepend(d);
   }
@@ -259,15 +260,22 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
   // Native <video> wrapped with the same method names as the YouTube player
   function nativePlayer(src) {
     const v = document.createElement("video");
+    let corsTried = !/^https?:/i.test(src);
+    if (!corsTried) v.crossOrigin = "anonymous";
     v.src = src; v.playsInline = true; v.preload = "metadata"; v.controls = false;
+    directReadable = null;
     v.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000";
     $("player").replaceWith(v);
     v.addEventListener("loadedmetadata", ready, { once: true });
     v.addEventListener("play", () => onState({ data: PS.PLAYING }));
     v.addEventListener("pause", () => { if (!v.ended) onState({ data: PS.PAUSED }); });
     v.addEventListener("ended", () => onState({ data: PS.ENDED }));
-    v.addEventListener("error", () => notice("Impossible de lire cette vidéo depuis son lien : il a peut-être expiré, il demande d'être connecté au site, ou le format n'est pas pris en charge. Solution : téléchargez la vidéo, puis utilisez « Ouvrir un fichier vidéo »."));
+    v.addEventListener("error", () => {
+      if (!corsTried) { corsTried = true; v.removeAttribute("crossorigin"); v.src = src; v.load(); return; }
+      notice("Impossible de lire cette vidéo depuis son lien : il a peut-être expiré, il demande d'être connecté au site, ou le format n'est pas pris en charge. Solution : téléchargez la vidéo, puis utilisez « Ouvrir un fichier vidéo ».");
+    });
     return {
+      el: v,
       playVideo: () => v.play().catch(() => {}), pauseVideo: () => v.pause(),
       seekTo: (t) => { v.currentTime = Math.max(0, Math.min(t, v.duration || t)); },
       getCurrentTime: () => v.currentTime, getDuration: () => isFinite(v.duration) ? v.duration : 0,
@@ -453,13 +461,33 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
   let prevSig = null, lastShotSig = null, lastShotWall = 0, busy = false;
   const shots = []; let seq = 0;
 
+  // Frames read straight from the <video> element (direct links and local files): full video, whatever the scroll
+  function directSource() {
+    const v = player && player.el;
+    if (!v || v.readyState < 2 || !v.videoWidth) return null;
+    if (directReadable === null) {
+      try { sctx.drawImage(v, 0, 0, 2, 2); sctx.getImageData(0, 0, 1, 1); directReadable = true; } catch (e) { directReadable = false; }
+    }
+    return directReadable ? v : null;
+  }
+  function fullyVisible() {
+    const r = E.playerWrap.getBoundingClientRect();
+    return r.top >= -1 && r.left >= -1 && r.bottom <= window.innerHeight + 1 && r.right <= window.innerWidth + 1;
+  }
+  let offscreenWarned = false;
   async function grab() {
+    const d = directSource(); if (d) return d;
     if (!vTrack || vTrack.readyState !== "live") return null;
+    if (!fullyVisible()) {
+      if (!offscreenWarned) { toast("Vidéo en partie hors de l'écran : captures en pause. Faites défiler pour la voir en entier.", E.snapInfo); offscreenWarned = true; setTimeout(() => offscreenWarned = false, 6000); }
+      prevSig = null; return null;
+    }
     if (imageCapture) { try { return await imageCapture.grabFrame(); } catch (e) {} }
     return hiddenVideo.videoWidth ? hiddenVideo : null;
   }
   // Source rectangle of the player inside the frame (whole frame when cropped by the browser)
   function region(src) {
+    if (player && src === player.el) return [0, 0, src.videoWidth, src.videoHeight];
     const w = src.videoWidth || src.width, h = src.videoHeight || src.height;
     if (cropped) return [0, 0, w, h];
     const r = E.playerWrap.getBoundingClientRect();
