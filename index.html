@@ -96,6 +96,26 @@ dialog { border: none; padding: 0; background: transparent; max-width: 95vw; max
 dialog img { max-width: 95vw; max-height: 92vh; display: block; border-radius: 6px; }
 dialog::backdrop { background: rgba(10, 15, 22, .85); }
 .toast { color: var(--muted); }
+.ai-toggle { font-weight: 700; border-color: var(--btn); }
+.ai-toggle[aria-expanded="true"] { background: var(--btn); color: var(--btn-ink); }
+.ai { border-color: var(--btn); }
+.ai h3 { font-family: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; font-size: 1.02rem; margin: 0 0 .6rem; }
+.keys { background: var(--bg); border-radius: 8px; padding: .7rem .9rem; margin-bottom: 1rem; }
+.keys summary { cursor: pointer; font-weight: 700; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .7rem; margin-top: .7rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; }
+.field span { color: var(--muted); font-size: .92rem; }
+.field input, .field select { width: 100%; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .8rem; }
+.step { border: 1.5px solid var(--line); border-radius: 8px; padding: .8rem .9rem; display: flex; flex-direction: column; gap: .55rem; }
+.ailog { list-style: none; padding: 0; margin: .9rem 0 0; max-height: 260px; overflow-y: auto; font-size: .93rem; }
+.ailog:empty { display: none; }
+.ailog li { padding: .25rem 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 4.3rem 1fr; gap: .5rem; }
+.ailog time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ailog li.err { color: var(--rec); }
+.ailog li.ok { font-weight: 700; }
+.shot.rejected { opacity: .45; }
+.shot .badge { font-size: .8rem; color: var(--muted); padding: 0 .55rem; }
 code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
 .queue { list-style: none; padding: 0; margin: .9rem 0 0; display: flex; flex-direction: column; gap: .45rem; }
 .queue li { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto auto; gap: .6rem; align-items: center; padding: .45rem .6rem; border: 1.5px solid var(--line); border-radius: 8px; }
@@ -125,7 +145,10 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
 <div class="wrap">
   <header>
     <h1>Capteur de tuto auto</h1>
-    <div class="status" id="status" role="status"><span class="dot"></span><span id="statusText">En attente d'une vidéo</span></div>
+    <div class="row">
+      <button id="aiToggle" class="ai-toggle" aria-expanded="false" aria-controls="aiPanel">✨ Mode IA</button>
+      <div class="status" id="status" role="status"><span class="dot"></span><span id="statusText">En attente d'une vidéo</span></div>
+    </div>
   </header>
 
   <div class="notice" id="notice" hidden></div>
@@ -174,6 +197,62 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       <span class="toast" id="snapInfo"></span>
     </div>
     <p class="hint" style="margin-top:.8rem">Au démarrage, Chrome demande de partager cet onglet : laissez « Partager aussi l'audio de l'onglet » coché. Restez sur cet onglet pendant l'analyse. Pour les vidéos YouTube, gardez la vidéo entièrement visible à l'écran et ne passez pas la souris dessus ; pour les liens directs et les fichiers, vous pouvez faire défiler librement. L'audio est transcrit par le service de reconnaissance vocale du navigateur ; les captures restent sur votre ordinateur.</p>
+  </section>
+
+  <section id="aiPanel" class="ai" hidden>
+    <h2><span class="n">✨ Mode IA ·</span> analyse sans lecture en temps réel</h2>
+    <p class="hint">Gemini regarde la vidéo et repère les moments clés, l'outil capture les images à ces instants, puis un second modèle trie et légende les captures et un troisième rédige la synthèse. La rédaction des skills se fait ensuite avec Claude, dans la conversation, à partir des .zip. Le .zip se télécharge à la fin de chaque vidéo. Fonctionne sur la vidéo chargée ou sur toute la file d'attente ci-dessous.</p>
+
+    <details class="keys" id="keysBox">
+      <summary>Clés API</summary>
+      <div class="grid2">
+        <label class="field"><span>Google Gemini <b>(requise)</b></span><input type="password" id="kGoogle" autocomplete="off" placeholder="AIza…"></label>
+        <label class="field"><span>Anthropic (Claude)</span><input type="password" id="kAnthropic" autocomplete="off" placeholder="sk-ant-…"></label>
+        <label class="field"><span>OpenAI</span><input type="password" id="kOpenai" autocomplete="off" placeholder="sk-…"></label>
+      </div>
+      <label class="inline" style="margin-top:.6rem"><input type="checkbox" id="kRemember"> Mémoriser les clés sur cet ordinateur</label>
+      <p class="hint" style="margin-top:.5rem">Les clés restent dans ce navigateur et partent uniquement vers le fournisseur concerné. Ne les écrivez jamais dans <code>index.html</code> : votre dépôt GitHub est public. Fixez une limite de dépenses dans la console de chaque fournisseur.</p>
+    </details>
+
+    <div class="row" style="margin-bottom:.8rem">
+      <button id="mRefresh">Actualiser la liste des modèles</button>
+      <span class="toast" id="mInfo">Liste par défaut (ajoutez vos clés puis actualisez).</span>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <h3>1 · Regarder la vidéo</h3>
+        <label class="field"><span>Modèle Gemini</span><select id="m1"></select></label>
+        <label class="field"><span>Résolution d'analyse</span>
+          <select id="m1res"><option value="MEDIA_RESOLUTION_LOW" selected>Basse (économique)</option><option value="">Standard</option></select>
+        </label>
+        <label class="field"><span>Captures maximum par vidéo</span>
+          <select id="maxShots"><option>10</option><option selected>15</option><option>20</option><option>25</option></select>
+        </label>
+      </div>
+      <div class="step">
+        <h3>2 · Analyser les captures</h3>
+        <label class="field"><span>Fournisseur</span>
+          <select id="p2"><option value="anthropic">Anthropic</option><option value="google">Google</option><option value="openai">OpenAI</option></select>
+        </label>
+        <label class="field"><span>Modèle</span><select id="m2"></select></label>
+      </div>
+      <div class="step">
+        <h3>3 · Synthèse de la vidéo</h3>
+        <label class="field"><span>Fournisseur</span>
+          <select id="p3"><option value="anthropic">Anthropic</option><option value="google">Google</option><option value="openai">OpenAI</option></select>
+        </label>
+        <label class="field"><span>Modèle</span><select id="m3"></select></label>
+      </div>
+    </div>
+    <p class="hint">Les listes viennent directement des fournisseurs et se mettent à jour toutes seules chaque semaine (ou avec le bouton). « Autre… » permet de saisir un nom de modèle à la main. Langue de la synthèse : français.</p>
+
+    <div class="row" style="margin-top:.4rem">
+      <button class="primary" id="aiOne">Analyser la vidéo chargée</button>
+      <button class="primary" id="aiQueue">Analyser toute la file</button>
+      <button id="aiStop" disabled>Arrêter</button>
+    </div>
+    <ol class="ailog" id="aiLog"></ol>
   </section>
 
   <section>
@@ -268,7 +347,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   // ---------- players: YouTube or direct video file ----------
   const PS = { ENDED: 0, PLAYING: 1, PAUSED: 2 };
   let directReadable = null;
-  let player = null, playerReady = false, videoUrl = "", nativeTitle = "";
+  let player = null, playerReady = false, videoUrl = "", nativeTitle = "", currentSource = null;
   let ytApi = null;
   function loadYtApi() {
     if (!ytApi) ytApi = new Promise((resolve) => {
@@ -289,7 +368,11 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     const d = document.createElement("div"); d.id = "player"; E.playerWrap.prepend(d);
   }
   let pendingLoad = null;
-  function loadFailed(msg) { notice(msg); if (pendingLoad) { pendingLoad.reject(new Error(msg)); pendingLoad = null; } }
+  function loadFailed(msg) {
+    notice(msg);
+    if (pendingLoad) { pendingLoad.reject(new Error(msg)); pendingLoad = null; }
+    else if (queueRunning && session && !aiRunning) skipItem(msg);   // error in the middle of playback
+  }
   function ready() {
     if (pendingLoad) { pendingLoad.resolve(); pendingLoad = null; }
     playerReady = true; E.start.disabled = false; setStatus("Prêt");
@@ -321,7 +404,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       getCurrentTime: () => v.currentTime, getDuration: () => isFinite(v.duration) ? v.duration : 0,
       getPlayerState: () => v.ended ? PS.ENDED : (!v.paused ? PS.PLAYING : PS.PAUSED),
       setPlaybackRate: (r) => { v.playbackRate = r; }, getPlaybackRate: () => v.playbackRate,
-      unMute: () => { v.muted = false; }, setVolume: (n) => { v.volume = n / 100; },
+      unMute: () => { v.muted = false; }, mute: () => { v.muted = true; }, setVolume: (n) => { v.volume = n / 100; },
       getVideoData: () => ({ title: nativeTitle }),
       destroy: () => { dead = true; v.pause(); v.removeAttribute("src"); v.load(); }
     };
@@ -333,6 +416,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
 
   // Loads one source; resolves when the video is ready to play
   async function loadSource(src, name) {
+    currentSource = src;
     const raw = (src.url || "").trim();
     let job;
     const done = new Promise((resolve, reject) => { job = { resolve, reject }; });
@@ -388,12 +472,16 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   function isPlaying() { try { return player.getPlayerState() === PS.PLAYING; } catch (e) { return false; } }
 
   function onState(e) {
+    if (aiRunning) return;
     if (!session) return;
     if (e.data === PS.PLAYING) { try { if (player.getPlaybackRate() !== rate) player.setPlaybackRate(rate); } catch (err) {} setStatus("Analyse en cours", "on"); E.pause.textContent = "Pause"; }
     else if (e.data === PS.PAUSED) { setStatus("En pause"); E.pause.textContent = "Reprendre"; }
     else if (e.data === PS.ENDED) { if (queueRunning) itemEnded(); else finish(true); }
   }
-  E.pause.onclick = () => { if (!player) return; isPlaying() ? player.pauseVideo() : player.playVideo(); };
+  E.pause.onclick = () => {
+    if (!player) return;
+    if (isPlaying()) { userPaused = true; player.pauseVideo(); } else { userPaused = false; player.playVideo(); }
+  };
   E.back.onclick = () => player && player.seekTo(Math.max(0, now() - 10), true);
   E.fwd.onclick = () => player && player.seekTo(now() + 10, true);
   let rate = 1;
@@ -442,6 +530,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   function startPlayback() {
     if (aTrack && !recog) startSpeech();
     try { player.unMute(); player.setVolume(100); player.setPlaybackRate(rate); } catch (e) {}
+    userPaused = false; wd.lastT = -1; wd.lastMove = Date.now(); wd.lastKick = Date.now();
     player.playVideo();
     setStatus("Analyse en cours", "on");
   }
@@ -531,6 +620,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       return;
     }
     currentItem.status = "running"; renderQueue();
+    wd.lastT = -1; wd.lastMove = Date.now(); wd.lastKick = Date.now(); userPaused = false;
     clearResults();
     setStatus("Chargement de la vidéo " + (queue.indexOf(currentItem) + 1) + "/" + queue.length);
     try {
@@ -545,12 +635,33 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     if (!queueRunning) return;
     startPlayback();
   }
-  async function itemEnded() {
+  async function itemEnded(failMsg) {
+    const item = currentItem;
+    if (!item || item.ending) return;          // never handle the same video twice
+    item.ending = true;
     stopSpeech();
     try { player.pauseVideo(); } catch (e) {}
-    if (shots.length || segments.length) await exportZip();
-    if (currentItem) { currentItem.status = "done"; renderQueue(); }
+    if (shots.length || segments.length) await exportZip();   // partial work is still exported
+    item.status = failMsg ? "error" : "done"; if (failMsg) item.error = failMsg;
+    renderQueue();
     setTimeout(nextItem, 1500);
+  }
+  function skipItem(msg) {
+    if (!currentItem || currentItem.ending) return;
+    notice("Vidéo " + (queue.indexOf(currentItem) + 1) + " interrompue : " + msg + " Ce qui a été capturé est exporté, la file passe à la suivante.");
+    itemEnded(msg);
+  }
+  // Watchdog: restarts a video that should be playing, detects a missed end, skips a frozen video
+  const wd = { lastT: -1, lastMove: 0, lastKick: 0 };
+  let userPaused = false;
+  function watchdog() {
+    if (!queueRunning || !session || aiRunning || !playerReady || !currentItem || currentItem.status !== "running" || currentItem.ending) return;
+    const t = now(); let dur = 0; try { dur = player.getDuration() || 0; } catch (e) {}
+    if (Math.abs(t - wd.lastT) > 0.2) { wd.lastT = t; wd.lastMove = Date.now(); }
+    if (userPaused) { wd.lastMove = Date.now(); return; }
+    if (dur && t >= dur - 1 && !isPlaying()) { itemEnded(); return; }                 // end not reported
+    if (!isPlaying() && Date.now() - wd.lastKick > 5000) { wd.lastKick = Date.now(); try { player.playVideo(); } catch (e) {} }
+    if (Date.now() - wd.lastMove > 120000) skipItem("la lecture est bloquée depuis 2 minutes.");
   }
 
   // ---------- speech recognition on the tab's audio ----------
@@ -676,6 +787,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     meta.append(tb, del);
     const note = document.createElement("input"); note.type = "text"; note.placeholder = "Note (ex. FVG haussier)"; note.oninput = () => shot.note = note.value;
     card.append(img, meta, note); E.shots.appendChild(card);
+    shot.card = card; shot.noteInput = note;
   }
   function updateCount() { E.count.textContent = "(" + shots.length + ")"; E.sEmpty.hidden = shots.length > 0; }
   E.viewer.onclick = () => E.viewer.close();
@@ -687,7 +799,8 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       E.time.innerHTML = fmt(cur) + " <small>/ " + fmt(dur) + "</small>";
       E.progress.style.width = dur ? (100 * cur / dur).toFixed(2) + "%" : "0";
     }
-    if (!session || busy || !E.auto.checked || !isPlaying()) return;
+    try { watchdog(); } catch (e) {}
+    if (aiRunning || !session || busy || !E.auto.checked || !isPlaying()) return;
     busy = true;
     try {
       const src = await grab(); if (!src) return;
@@ -751,6 +864,515 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     if (!confirm("Effacer la transcription et les captures ?")) return;
     clearResults(); E.start.textContent = "Démarrer l'analyse"; toast("Tout est effacé.");
   };
+
+  // =====================================================================
+  // ✨ MODE IA
+  // =====================================================================
+  const A = {
+    toggle: $("aiToggle"), panel: $("aiPanel"), kGoogle: $("kGoogle"), kAnthropic: $("kAnthropic"), kOpenai: $("kOpenai"),
+    kRemember: $("kRemember"), mRefresh: $("mRefresh"), mInfo: $("mInfo"), keysBox: $("keysBox"), m1: $("m1"), m1res: $("m1res"), maxShots: $("maxShots"),
+    p2: $("p2"), m2: $("m2"), p3: $("p3"), m3: $("m3"), one: $("aiOne"), all: $("aiQueue"), stop: $("aiStop"), log: $("aiLog")
+  };
+  let aiRunning = false, aiAbort = null;
+  const DEFAULTS = {
+    p2: { anthropic: "claude-opus-5-5", google: "gemini-3.1-pro-preview", openai: "gpt-6.1-sol" },
+    p3: { anthropic: "claude-sonnet-5-5", google: "gemini-3.8-flash", openai: "gpt-6.1-sol" }
+  };
+  const PREFS = "capteur-ia-prefs-v1", KEYS = "capteur-ia-keys-v1";
+
+  A.toggle.onclick = () => {
+    const open = A.panel.hidden; A.panel.hidden = !open; A.toggle.setAttribute("aria-expanded", String(open));
+    if (open) A.panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  // ---------- model lists ----------
+  const MODELS = "capteur-ia-models-v1";
+  const FALLBACK = {
+    google: ["gemini-3.8-flash", "gemini-3.1-pro-preview"],
+    anthropic: ["claude-opus-5-5", "claude-sonnet-5-5"],
+    openai: ["gpt-6.1-sol"]
+  };
+  let modelCache = { google: null, anthropic: null, openai: null, date: 0 };
+  try { const c = JSON.parse(localStorage.getItem(MODELS) || "null"); if (c) modelCache = c; } catch (e) {}
+
+  function listFor(provider) {
+    const l = modelCache[provider];
+    return (l && l.length) ? l : FALLBACK[provider].map(id => ({ id, label: id }));
+  }
+  function fillSelect(sel, provider, preferred) {
+    const list = listFor(provider).slice();
+    if (preferred && !list.some(m => m.id === preferred)) list.unshift({ id: preferred, label: preferred + " (choix enregistré)" });
+    sel.textContent = "";
+    list.forEach(m => { const o = document.createElement("option"); o.value = m.id; o.textContent = m.label; sel.appendChild(o); });
+    const other = document.createElement("option"); other.value = "__custom__"; other.textContent = "Autre (saisir un nom)…"; sel.appendChild(other);
+    sel.value = preferred && list.some(m => m.id === preferred) ? preferred : list[0].id;
+    sel.dataset.last = sel.value;
+  }
+  function onModelChange(sel) {
+    if (sel.value === "__custom__") {
+      const id = (prompt("Nom exact du modèle (tel qu'indiqué dans la documentation du fournisseur) :") || "").trim();
+      if (!id) { sel.value = sel.dataset.last || sel.options[0].value; return; }
+      if (![...sel.options].some(o => o.value === id)) { const o = document.createElement("option"); o.value = id; o.textContent = id; sel.insertBefore(o, sel.options[0]); }
+      sel.value = id;
+    }
+    sel.dataset.last = sel.value; savePrefs();
+  }
+  [A.m1, A.m2, A.m3].forEach(sel => sel.addEventListener("change", () => onModelChange(sel)));
+  A.p2.onchange = () => { fillSelect(A.m2, A.p2.value, DEFAULTS.p2[A.p2.value]); savePrefs(); };
+  A.p3.onchange = () => { fillSelect(A.m3, A.p3.value, DEFAULTS.p3[A.p3.value]); savePrefs(); };
+  [A.m1res, A.maxShots].forEach(el => el.addEventListener("change", savePrefs));
+
+  const SKIP_OPENAI = /(embedding|tts|whisper|transcribe|audio|realtime|image|dall-e|moderation|search|instruct|babbage|davinci|codex|computer-use|sora)/i;
+  const SKIP_GOOGLE = /(embedding|tts|image|live|native-audio|aqa|imagen|veo|robotics)/i;
+  const vSort = (a, b) => b.id.localeCompare(a.id, "en", { numeric: true });
+  async function fetchModels(provider, key) {
+    if (provider === "anthropic") {
+      const r = await fetch("https://api.anthropic.com/v1/models?limit=1000", { headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } });
+      if (!r.ok) throw await httpError(r, "Anthropic");
+      return (await r.json()).data.map(m => ({ id: m.id, label: (m.display_name || m.id) + " · " + m.id }));
+    }
+    if (provider === "openai") {
+      const r = await fetch("https://api.openai.com/v1/models", { headers: { authorization: "Bearer " + key } });
+      if (!r.ok) throw await httpError(r, "OpenAI");
+      return (await r.json()).data.filter(m => /^(gpt|o\d|chatgpt)/i.test(m.id) && !SKIP_OPENAI.test(m.id))
+        .sort((a, b) => (b.created || 0) - (a.created || 0)).map(m => ({ id: m.id, label: m.id }));
+    }
+    let out = [], token = "";
+    do {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000" + (token ? "&pageToken=" + encodeURIComponent(token) : ""), { headers: { "x-goog-api-key": key } });
+      if (!r.ok) throw await httpError(r, "Gemini");
+      const d = await r.json(); token = d.nextPageToken || "";
+      out = out.concat((d.models || []).filter(m => (m.supportedGenerationMethods || []).includes("generateContent") && /gemini/i.test(m.name) && !SKIP_GOOGLE.test(m.name)));
+    } while (token);
+    return out.map(m => ({ id: m.name.replace(/^models\//, ""), label: (m.displayName || m.name) + " · " + m.name.replace(/^models\//, "") })).sort(vSort);
+  }
+  async function refreshModels(silent) {
+    const keys = { google: A.kGoogle.value.trim(), anthropic: A.kAnthropic.value.trim(), openai: A.kOpenai.value.trim() };
+    if (!keys.google && !keys.anthropic && !keys.openai) { if (!silent) toast("Ajoutez au moins une clé API.", A.mInfo); return; }
+    A.mRefresh.disabled = true; A.mInfo.textContent = "Récupération des listes…";
+    const counts = [], errors = [];
+    for (const p of ["google", "anthropic", "openai"]) {
+      if (!keys[p]) continue;
+      try { modelCache[p] = await fetchModels(p, keys[p]); counts.push({ google: "Google", anthropic: "Anthropic", openai: "OpenAI" }[p] + " " + modelCache[p].length); }
+      catch (e) { errors.push(e.message); }
+    }
+    modelCache.date = Date.now();
+    try { localStorage.setItem(MODELS, JSON.stringify(modelCache)); } catch (e) {}
+    const keep = { m1: A.m1.value, m2: A.m2.value, m3: A.m3.value };
+    fillSelect(A.m1, "google", keep.m1); fillSelect(A.m2, A.p2.value, keep.m2); fillSelect(A.m3, A.p3.value, keep.m3);
+    A.mRefresh.disabled = false;
+    showModelInfo(counts.join(" · "));
+    if (errors.length) notice("Liste des modèles : " + errors.join(" / "));
+  }
+  function showModelInfo(extra) {
+    A.mInfo.textContent = modelCache.date ? "Listes du " + new Date(modelCache.date).toLocaleDateString("fr-FR") + (extra ? " · " + extra : "") : "Liste par défaut (ajoutez vos clés puis actualisez).";
+  }
+  A.mRefresh.onclick = () => refreshModels(false);
+  [A.kGoogle, A.kAnthropic, A.kOpenai].forEach(el => el.addEventListener("change", saveKeys));
+  A.kRemember.onchange = saveKeys;
+
+  function savePrefs() {
+    try { localStorage.setItem(PREFS, JSON.stringify({ m1: A.m1.value, m1res: A.m1res.value, maxShots: A.maxShots.value, p2: A.p2.value, m2: A.m2.value, p3: A.p3.value, m3: A.m3.value })); } catch (e) {}
+  }
+  function saveKeys() {
+    try {
+      if (A.kRemember.checked) localStorage.setItem(KEYS, JSON.stringify({ g: A.kGoogle.value.trim(), a: A.kAnthropic.value.trim(), o: A.kOpenai.value.trim() }));
+      else localStorage.removeItem(KEYS);
+    } catch (e) {}
+  }
+  (function restore() {
+    let p = null;
+    try {
+      p = JSON.parse(localStorage.getItem(PREFS) || "null");
+      if (p) { ["m1res", "maxShots", "p2", "p3"].forEach(k => { if (p[k] != null) A[k].value = p[k]; }); }
+      const k = JSON.parse(localStorage.getItem(KEYS) || "null");
+      if (k) { A.kGoogle.value = k.g || ""; A.kAnthropic.value = k.a || ""; A.kOpenai.value = k.o || ""; A.kRemember.checked = true; }
+    } catch (e) {}
+    fillSelect(A.m1, "google", (p && p.m1) || "gemini-3.8-flash");
+    fillSelect(A.m2, A.p2.value, (p && p.m2) || DEFAULTS.p2[A.p2.value]);
+    fillSelect(A.m3, A.p3.value, (p && p.m3) || DEFAULTS.p3[A.p3.value]);
+    showModelInfo();
+    // weekly automatic refresh when keys are known
+    if (Date.now() - (modelCache.date || 0) > 7 * 86400000) refreshModels(true);
+  })();
+  [A.kGoogle, A.kAnthropic, A.kOpenai].forEach(el => el.addEventListener("change", () => { if (el.value.trim()) refreshModels(true); }));
+
+  function logAI(msg, kind) {
+    const li = document.createElement("li"); if (kind) li.className = kind;
+    const t = document.createElement("time"); t.textContent = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const s = document.createElement("span"); s.textContent = msg;
+    li.append(t, s); A.log.appendChild(li); A.log.scrollTop = A.log.scrollHeight;
+  }
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  function checkAbort() { if (aiAbort && aiAbort.signal.aborted) throw new Error("Analyse arrêtée."); }
+  function keyFor(provider) {
+    const k = { google: A.kGoogle, anthropic: A.kAnthropic, openai: A.kOpenai }[provider].value.trim();
+    if (!k) throw new Error("Clé API " + { google: "Google", anthropic: "Anthropic", openai: "OpenAI" }[provider] + " manquante (section « Clés API »).");
+    return k;
+  }
+  function toSec(v) {
+    if (typeof v === "number") return v;
+    const parts = String(v || "").trim().split(":").map(Number);
+    if (parts.some(isNaN)) return NaN;
+    return parts.reduce((a, b) => a * 60 + b, 0);
+  }
+  function parseJSON(text) {
+    let t = String(text || "").replace(/```json|```/g, "").trim();
+    const a = t.indexOf("{"), b = t.lastIndexOf("}");
+    if (a > -1 && b > a) t = t.slice(a, b + 1);
+    return JSON.parse(t);
+  }
+  function blobToB64(blob) {
+    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("Lecture impossible")); r.readAsDataURL(blob); });
+  }
+  async function shrink(blob, max) {
+    const bmp = await createImageBitmap(blob);
+    const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(r => c.toBlob(r, "image/jpeg", 0.85));
+  }
+  async function httpError(res, who) {
+    let detail = ""; try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || JSON.stringify(j).slice(0, 300); } catch (e) {}
+    const hint = res.status === 401 || res.status === 403 ? " (clé refusée ?)" : res.status === 404 ? " (nom de modèle inconnu ?)" : res.status === 429 ? " (limite de requêtes ou de crédit atteinte)" : "";
+    return new Error(who + " : erreur " + res.status + hint + (detail ? " — " + detail : ""));
+  }
+
+  // ---------- generic LLM call (text + images) ----------
+  async function llm(provider, model, { system, text, images = [] }, { json = false, maxTokens = 16000 } = {}) {
+    const key = keyFor(provider), signal = aiAbort && aiAbort.signal;
+    if (provider === "anthropic") {
+      const content = images.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })).concat([{ type: "text", text }]);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", signal,
+        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] })
+      });
+      if (!res.ok) throw await httpError(res, "Anthropic");
+      const d = await res.json();
+      return { text: d.content.filter(c => c.type === "text").map(c => c.text).join("\n"), usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens" };
+    }
+    if (provider === "openai") {
+      const content = [{ type: "input_text", text }].concat(images.map(b64 => ({ type: "input_image", image_url: "data:image/jpeg;base64," + b64 })));
+      const body = { model, instructions: system, input: [{ role: "user", content }], max_output_tokens: Math.max(maxTokens, 32000) };
+      if (json) body.text = { format: { type: "json_object" } };
+      const res = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST", signal, headers: { "content-type": "application/json", "authorization": "Bearer " + key }, body: JSON.stringify(body)
+      });
+      if (!res.ok) throw await httpError(res, "OpenAI");
+      const d = await res.json();
+      const out = (d.output || []).flatMap(o => o.content || []).filter(c => c.type === "output_text").map(c => c.text).join("\n");
+      return { text: out, usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens" };
+    }
+    // google
+    const parts = images.map(b64 => ({ inline_data: { mime_type: "image/jpeg", data: b64 } })).concat([{ text }]);
+    const gen = { maxOutputTokens: Math.max(maxTokens, 32000) };
+    if (json) gen.responseMimeType = "application/json";
+    return gemini(model, { system_instruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts }], generationConfig: gen });
+  }
+  async function gemini(model, body) {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+      method: "POST", signal: aiAbort && aiAbort.signal,
+      headers: { "content-type": "application/json", "x-goog-api-key": keyFor("google") }, body: JSON.stringify(body)
+    });
+    if (!res.ok) throw await httpError(res, "Gemini");
+    const d = await res.json();
+    const cand = d.candidates && d.candidates[0];
+    if (!cand || !cand.content) throw new Error("Gemini n'a pas renvoyé de réponse" + (d.promptFeedback ? " (" + JSON.stringify(d.promptFeedback).slice(0, 200) + ")" : "") + ".");
+    const u = d.usageMetadata || {};
+    return { text: (cand.content.parts || []).map(p => p.text || "").join(""), usage: (u.promptTokenCount || "?") + " → " + ((u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0)) + " tokens", finish: cand.finishReason };
+  }
+
+  // ---------- Gemini Files API (for .mp4 and local files) ----------
+  async function uploadToGemini(blob, name) {
+    const key = keyFor("google"), mime = blob.type || "video/mp4";
+    const start = await fetch("https://generativelanguage.googleapis.com/upload/v1beta/files?key=" + encodeURIComponent(key), {
+      method: "POST", signal: aiAbort && aiAbort.signal,
+      headers: { "X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start", "X-Goog-Upload-Header-Content-Length": String(blob.size), "X-Goog-Upload-Header-Content-Type": mime, "Content-Type": "application/json" },
+      body: JSON.stringify({ file: { display_name: name.slice(0, 100) } })
+    });
+    if (!start.ok) throw await httpError(start, "Gemini (envoi)");
+    const upUrl = start.headers.get("x-goog-upload-url");
+    if (!upUrl) throw new Error("Gemini n'a pas fourni d'adresse d'envoi pour la vidéo.");
+    const up = await fetch(upUrl, { method: "POST", signal: aiAbort && aiAbort.signal, headers: { "X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize" }, body: blob });
+    if (!up.ok) throw await httpError(up, "Gemini (envoi)");
+    let file = (await up.json()).file;
+    const t0 = Date.now();
+    while (file.state === "PROCESSING") {
+      checkAbort();
+      if (Date.now() - t0 > 15 * 60 * 1000) throw new Error("Gemini met trop de temps à préparer la vidéo.");
+      await sleep(4000);
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/" + file.name, { headers: { "x-goog-api-key": key }, signal: aiAbort && aiAbort.signal });
+      if (!r.ok) throw await httpError(r, "Gemini (préparation)");
+      file = await r.json();
+    }
+    if (file.state !== "ACTIVE") throw new Error("Gemini n'a pas pu préparer la vidéo (état : " + file.state + ").");
+    return file;
+  }
+  function deleteGeminiFile(file) {
+    try { fetch("https://generativelanguage.googleapis.com/v1beta/" + file.name, { method: "DELETE", headers: { "x-goog-api-key": A.kGoogle.value.trim() } }).catch(() => {}); } catch (e) {}
+  }
+  async function videoBlob(src) {
+    if (src.file) return src.file;
+    try {
+      const r = await fetch(src.url, { signal: aiAbort && aiAbort.signal });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.blob();
+    } catch (e) {
+      if (aiAbort && aiAbort.signal.aborted) throw e;
+      throw new Error("Impossible de récupérer ce .mp4 depuis son lien pour l'envoyer à Gemini (le site ne l'autorise pas). Téléchargez la vidéo et ajoutez-la avec « Ouvrir un fichier vidéo » ou « Ajouter des fichiers vidéo ».");
+    }
+  }
+
+  // ---------- step 1: Gemini watches the video ----------
+  const WATCH_PROMPT = (n) => `Tu analyses un tutoriel de trading sur les concepts ICT (Inner Circle Trader). Regarde toute la vidéo (image et son).
+Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
+{
+  "titre_propose": "titre court et descriptif de la vidéo",
+  "langue": "code de la langue parlée (fr, en…)",
+  "resume_court": "3 à 5 phrases en français",
+  "transcription": [ { "debut": 12.5, "texte": "phrase(s) prononcée(s)" } ],
+  "moments_cles": [ { "t": 83.0, "concept": "nom du concept ICT", "raison": "ce que montre l'écran à cet instant et pourquoi c'est un bon exemple" } ]
+}
+Règles :
+- "debut" et "t" sont des nombres de secondes depuis le début de la vidéo.
+- La transcription est fidèle et complète, dans la langue d'origine, découpée en segments de 1 à 3 phrases.
+- Choisis au maximum ${n} moments clés, uniquement quand un graphique illustre clairement un concept (zone tracée, annotation terminée, setup complet). Évite les plans sur le visage du formateur, les transitions et les doublons. Place "t" au moment où le tracé est terminé et bien visible.`;
+
+  async function watchVideo(src, title) {
+    let part, uploaded = null;
+    const raw = (src.url || "").trim();
+    if (!src.file && isYoutube(raw)) {
+      part = { file_data: { file_uri: raw, mime_type: "video/*" } };
+      logAI("Gemini regarde la vidéo YouTube…");
+    } else {
+      logAI("Récupération de la vidéo…");
+      const blob = await videoBlob(src); checkAbort();
+      logAI("Envoi à Gemini (" + Math.round(blob.size / 1048576) + " Mo), puis préparation…");
+      uploaded = await uploadToGemini(blob, title || "video");
+      part = { file_data: { file_uri: uploaded.uri, mime_type: uploaded.mimeType || "video/mp4" } };
+      logAI("Gemini regarde la vidéo…");
+    }
+    const gen = { responseMimeType: "application/json", maxOutputTokens: 65536 };
+    if (A.m1res.value) gen.mediaResolution = A.m1res.value;
+    try {
+      const r = await gemini(A.m1.value.trim(), { contents: [{ role: "user", parts: [part, { text: WATCH_PROMPT(parseInt(A.maxShots.value, 10)) }] }], generationConfig: gen });
+      logAI("Analyse vidéo terminée (" + r.usage + ").");
+      if (r.finish === "MAX_TOKENS") logAI("Réponse tronquée : vidéo trop longue pour une seule passe.", "err");
+      return parseJSON(r.text);
+    } finally { if (uploaded) deleteGeminiFile(uploaded); }
+  }
+
+  // ---------- grab a frame at a given time ----------
+  async function frameAt(t) {
+    const v = player && player.el;
+    if (v && directSource()) {
+      v.pause();
+      await new Promise((res) => { const done = () => { v.removeEventListener("seeked", done); res(); }; v.addEventListener("seeked", done); v.currentTime = Math.max(0, Math.min(t, (v.duration || t) - 0.05)); setTimeout(done, 6000); });
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return directSource();
+    }
+    // tab capture path (YouTube, or .mp4 the site does not let us read directly)
+    if (!vTrack) return null;
+    E.playerWrap.scrollIntoView({ block: "center" });
+    try { player.mute(); } catch (e) {}
+    player.seekTo(Math.max(0, t - 0.6), true); player.playVideo();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 9000) { await sleep(120); if (isPlaying() && now() >= t - 0.05) break; }
+    await sleep(250);
+    const src = await grab();
+    try { player.pauseVideo(); } catch (e) {}
+    return src;
+  }
+  async function shotFrom(src, t) {
+    const [x, y, w, h] = region(src);
+    const scale = Math.min(1, 1920 / w);
+    big.width = Math.round(w * scale); big.height = Math.round(h * scale);
+    bctx.drawImage(src, x, y, w, h, 0, 0, big.width, big.height);
+    const blob = await new Promise(r => big.toBlob(r, "image/jpeg", 0.9));
+    if (!blob) return null;
+    const shot = { id: ++seq, t, blob, url: URL.createObjectURL(blob), note: "", auto: true };
+    shots.push(shot); renderShot(shot); updateCount();
+    return shot;
+  }
+
+  // ---------- step 2: analyse captures ----------
+  function excerpt(segs, t, before, after) {
+    return segs.filter(s => s.t >= t - before && s.t <= t + after).map(s => "[" + fmt(s.t) + "] " + s.text).join("\n");
+  }
+  async function analyseShots(list, segs, moments) {
+    const images = [];
+    for (const s of list) images.push(await blobToB64(await shrink(s.blob, 1568)));
+    const desc = list.map((s, i) => {
+      const m = moments[i] || {};
+      return `Capture ${i + 1} — fichier ${s.file} — à ${fmt(s.t)}\nRepérée pour : ${m.concept || "?"} — ${m.raison || ""}\nCe que dit le formateur autour de ce moment :\n${excerpt(segs, s.t, 45, 20) || "(rien)"}`;
+    }).join("\n\n");
+    const system = "Tu es un expert des concepts ICT (Inner Circle Trader) et de l'analyse de graphiques. Tu réponds en français, uniquement avec du JSON valide.";
+    const text = `Voici ${list.length} captures d'un tutoriel ICT, dans l'ordre (image 1 = capture 1, etc.), avec le contexte de chacune :
+
+${desc}
+
+Pour chaque capture, décide si elle mérite d'être gardée comme exemple pédagogique (graphique lisible, concept clairement illustré, pas un doublon d'une capture meilleure). Réponds avec ce JSON :
+{ "captures": [ { "numero": 1, "garder": true, "motif_rejet": "", "concepts": ["…"], "legende": "légende courte (max 12 mots)", "description_graphique": "ce que montre précisément le graphique : unité de temps si visible, zones tracées, structure, entrée, invalidation…", "enseignement": "ce que cet exemple apprend, relié aux paroles du formateur" } ] }`;
+    logAI("Analyse de " + list.length + " captures par " + A.m2.value.trim() + "…");
+    const r = await llm(A.p2.value, A.m2.value.trim(), { system, text, images }, { json: true, maxTokens: 16000 });
+    logAI("Captures analysées (" + r.usage + ").");
+    return parseJSON(r.text);
+  }
+
+  // ---------- step 3: synthesis ----------
+  async function synthesise(title, url, segs, kept, resume) {
+    const system = "Tu es un formateur expert des concepts ICT (Inner Circle Trader). Tu écris en français, de façon précise, structurée et fidèle à la vidéo : tu n'inventes aucune règle que le formateur n'a pas donnée, et tu signales les points ambigus.";
+    const caps = kept.map(k => `- ${k.file} (${fmt(k.t)}) — ${k.legende}\n  Graphique : ${k.description_graphique}\n  Enseignement : ${k.enseignement}`).join("\n");
+    const text = `Vidéo : ${title}\nSource : ${url}\nRésumé rapide : ${resume || "—"}
+
+Transcription horodatée :
+${segs.map(s => "[" + fmt(s.t) + "] " + s.text).join("\n")}
+
+Captures retenues (dans le dossier captures/) :
+${caps || "(aucune)"}
+
+Rédige en Markdown :
+# Synthèse — (titre)
+## En bref (5 lignes max)
+## Concepts abordés
+Pour chaque concept : définition selon le formateur, conditions de validité, étapes d'identification ou d'exécution, erreurs à éviter, avec l'horodatage des passages.
+## Exemples tirés de la vidéo
+Pour chaque capture retenue : image en Markdown ![légende](captures/fichier.jpg), puis ce qu'elle illustre.
+## Points ambigus ou à vérifier
+
+Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de matière première pour les rédiger plus tard.`;
+    logAI("Rédaction de la synthèse par " + A.m3.value.trim() + "…");
+    const r = await llm(A.p3.value, A.m3.value.trim(), { system, text }, { maxTokens: 16000 });
+    logAI("Synthèse rédigée (" + r.usage + ").");
+    return r.text;
+  }
+
+  // ---------- one video, end to end ----------
+  async function analyseOne(src, name) {
+    clearResults();
+    const title0 = name || E.title.value.trim();
+    if (!(playerReady && currentSource === src)) {
+      logAI("Chargement de la vidéo…");
+      await loadSource(src, name);
+    }
+    checkAbort();
+    const watch = await watchVideo(src, title0 || videoTitle()); checkAbort();
+    if (!E.title.value.trim() && watch.titre_propose) E.title.value = watch.titre_propose;
+    const title = videoTitle();
+
+    const segs = (watch.transcription || []).map(s => ({ t: toSec(s.debut), text: String(s.texte || "").trim() })).filter(s => isFinite(s.t) && s.text);
+    segs.forEach(s => addSegment(s));
+    let moments = (watch.moments_cles || []).map(m => ({ ...m, t: toSec(m.t) })).filter(m => isFinite(m.t)).sort((a, b) => a.t - b.t);
+    moments = moments.filter((m, i) => i === 0 || m.t - moments[i - 1].t > 3).slice(0, parseInt(A.maxShots.value, 10));
+    logAI(segs.length + " segments transcrits, " + moments.length + " moments clés repérés.");
+
+    const list = [], kept = [];
+    for (let i = 0; i < moments.length; i++) {
+      checkAbort();
+      const src2 = await frameAt(moments[i].t);
+      if (!src2) { logAI("Capture impossible à " + fmt(moments[i].t) + " (vidéo hors écran ou partage arrêté).", "err"); continue; }
+      const s = await shotFrom(src2, moments[i].t);
+      if (s) { s.moment = moments[i]; s.file = String(list.length + 1).padStart(3, "0") + "_" + fmt(s.t, "-") + ".jpg"; s.noteInput.value = s.note = moments[i].concept || ""; list.push(s); }
+    }
+    logAI(list.length + " captures prises.");
+
+    let analysis = { captures: [] };
+    if (list.length) {
+      try { analysis = await analyseShots(list, segs, list.map(s => s.moment)); }
+      catch (e) { if (aiAbort.signal.aborted) throw e; logAI("Analyse des captures impossible : " + e.message + " — toutes les captures sont gardées.", "err"); }
+    }
+    list.forEach((s, i) => {
+      const a = (analysis.captures || []).find(c => Number(c.numero) === i + 1) || {};
+      s.ai = { garder: a.garder !== false, motif_rejet: a.motif_rejet || "", concepts: a.concepts || [], legende: a.legende || (s.moment.concept || ""), description_graphique: a.description_graphique || s.moment.raison || "", enseignement: a.enseignement || "" };
+      s.note = s.ai.legende; s.noteInput.value = s.note;
+      if (!s.ai.garder) { s.card.classList.add("rejected"); s.card.title = "Écartée : " + s.ai.motif_rejet; }
+      if (s.ai.garder) kept.push({ file: s.file, t: s.t, ...s.ai });
+    });
+    if (list.length) logAI(kept.length + " captures retenues sur " + list.length + ".");
+    checkAbort();
+
+    let synthesis = "";
+    try { synthesis = await synthesise(title, videoUrl, segs, kept, watch.resume_court); }
+    catch (e) { if (aiAbort.signal.aborted) throw e; logAI("Synthèse impossible : " + e.message, "err"); synthesis = "# Synthèse indisponible\n\n" + e.message; }
+
+    await exportAI(title, segs, list, synthesis, watch, analysis);
+    logAI("✓ « " + title + " » terminé, .zip téléchargé.", "ok");
+  }
+
+  async function exportAI(title, segs, list, synthesis, watch, analysis) {
+    const zip = new JSZip();
+    list.forEach(s => zip.file((s.ai && !s.ai.garder ? "captures-ecartees/" : "captures/") + s.file, s.blob));
+    const keptN = list.filter(s => !s.ai || s.ai.garder).length;
+    zip.file("index.md", [
+      "# " + title, "",
+      "- Vidéo : " + (videoUrl || "—"),
+      "- Analysée le : " + new Date().toLocaleString("fr-FR"),
+      "- Modèles : vidéo " + A.m1.value + " · captures " + A.m2.value + " · synthèse " + A.m3.value,
+      "- Captures : " + keptN + " retenues, " + (list.length - keptN) + " écartées", "",
+      "Fichiers : synthese.md (synthèse de la vidéo), analyse-captures.md, transcription.txt, captures/, captures-ecartees/, donnees-ia.json."
+    ].join("\n"));
+    zip.file("synthese.md", synthesis);
+    zip.file("transcription.txt", segs.map(s => "[" + fmt(s.t) + "] " + s.text).join("\n") || "(aucune)");
+    zip.file("analyse-captures.md", "# Analyse des captures — " + title + "\n\n" + list.map(s => {
+      const a = s.ai || {};
+      return `## ${s.file} · ${fmt(s.t)} · ${a.garder === false ? "écartée" : "retenue"}\n\n![](${a.garder === false ? "captures-ecartees" : "captures"}/${s.file})\n\n- **Légende** : ${a.legende || ""}\n- **Concepts** : ${(a.concepts || []).join(", ")}\n- **Graphique** : ${a.description_graphique || ""}\n- **Enseignement** : ${a.enseignement || ""}${a.garder === false ? "\n- **Motif du rejet** : " + a.motif_rejet : ""}\n`;
+    }).join("\n"));
+    zip.file("donnees-ia.json", JSON.stringify({ video: watch, captures: analysis }, null, 2));
+    const blob = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = slug(title) + "-ia.zip";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // ---------- runners ----------
+  function needsTabCapture(srcs) { return srcs.some(s => !s.file); }
+  function setAIBusy(on) {
+    aiRunning = on;
+    A.one.disabled = on; A.all.disabled = on; A.stop.disabled = !on;
+    [E.start, E.load, E.url, E.file, E.qRun, E.qClear].forEach(b => b.disabled = on);
+    setStatus(on ? "Analyse IA en cours" : "Prêt", on ? "on" : "");
+  }
+  async function runAI(items) {
+    try { keyFor("google"); keyFor(A.p2.value); keyFor(A.p3.value); }
+    catch (e) { notice(e.message); A.keysBox.open = true; return; }
+    if (session) { toast("Terminez d'abord l'analyse en cours."); return; }
+    notice(""); A.log.textContent = "";
+    if (typeof JSZip === "undefined") { notice("La bibliothèque d'export n'a pas pu se charger. Vérifiez votre connexion."); return; }
+    // tab sharing is asked once, right after the click, for sources whose frames may not be readable directly
+    if (needsTabCapture(items.map(i => i.src))) {
+      logAI("Partage de l'onglet : choisissez « Cet onglet » (l'audio n'est pas nécessaire).");
+      if (!(await beginCapture())) { logAI("Partage refusé : les captures des vidéos YouTube seront impossibles.", "err"); }
+      lockUI(false);
+    }
+    aiAbort = new AbortController(); setAIBusy(true);
+    for (const it of items) {
+      if (aiAbort.signal.aborted) break;
+      if (it.q) { it.q.status = "running"; renderQueue(); }
+      logAI("— " + (it.name || it.src.url || (it.src.file && it.src.file.name)) + " —");
+      try { await analyseOne(it.src, it.name); if (it.q) it.q.status = "done"; }
+      catch (e) {
+        logAI(e.message, "err");
+        if (it.q) { it.q.status = aiAbort.signal.aborted ? "pending" : "error"; it.q.error = e.message; }
+      }
+      if (it.q) renderQueue();
+    }
+    const stopped = aiAbort.signal.aborted;
+    setAIBusy(false);
+    if (session) finish(false);
+    lockUI(false); renderQueue();
+    setStatus(stopped ? "Analyse IA arrêtée" : "Analyse IA terminée", "done");
+    if (!stopped) logAI("Terminé.", "ok");
+  }
+  A.one.onclick = () => {
+    if (!currentSource || !playerReady) { toast("Chargez d'abord une vidéo (lien ou fichier)."); return; }
+    runAI([{ src: currentSource, name: E.title.value.trim() }]);
+  };
+  A.all.onclick = () => {
+    const items = queue.filter(q => q.status === "pending").map(q => ({ q, src: q.file ? { file: q.file } : { url: q.url }, name: q.name }));
+    if (!items.length) { toast("La file d'attente est vide."); return; }
+    runAI(items);
+  };
+  A.stop.onclick = () => { if (aiAbort) { aiAbort.abort(); logAI("Arrêt demandé…"); } };
+
   window.addEventListener("beforeunload", (e) => { if (shots.length || segments.length) { e.preventDefault(); e.returnValue = ""; } });
   updateCount();
 })();
