@@ -115,6 +115,11 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
 .ailog li.err { color: var(--rec); }
 .ailog li.ok { font-weight: 700; }
 .shot.rejected { opacity: .45; }
+button.small { padding: .35rem .6rem; font-size: .9rem; align-self: flex-start; }
+.chips { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .3rem; }
+.chips:empty { display: none; }
+.chips li { display: flex; justify-content: space-between; align-items: center; gap: .4rem; background: var(--bg); border-radius: 6px; padding: .25rem .25rem .25rem .55rem; font-size: .88rem; overflow-wrap: anywhere; }
+.chips li button { border: none; background: none; padding: .1rem .4rem; color: var(--muted); font-size: 1rem; line-height: 1; }
 .shot .badge { font-size: .8rem; color: var(--muted); padding: 0 .55rem; }
 code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-radius: 4px; overflow-wrap: anywhere; }
 .queue { list-style: none; padding: 0; margin: .9rem 0 0; display: flex; flex-direction: column; gap: .45rem; }
@@ -236,6 +241,8 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
           <select id="p2"><option value="anthropic">Anthropic</option><option value="google">Google</option><option value="openai">OpenAI</option></select>
         </label>
         <label class="field"><span>Modèle</span><select id="m2"></select></label>
+        <button class="small" id="add2">+ Ajouter à la comparaison</button>
+        <ul class="chips" id="cmp2"></ul>
       </div>
       <div class="step">
         <h3>3 · Synthèse de la vidéo</h3>
@@ -243,13 +250,17 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
           <select id="p3"><option value="anthropic">Anthropic</option><option value="google">Google</option><option value="openai">OpenAI</option></select>
         </label>
         <label class="field"><span>Modèle</span><select id="m3"></select></label>
+        <button class="small" id="add3">+ Ajouter à la comparaison</button>
+        <ul class="chips" id="cmp3"></ul>
       </div>
     </div>
+    <p class="hint"><b>Comparer des modèles :</b> le modèle sélectionné dans chaque étape sert de référence (c'est lui qui décide des captures retenues) ; ceux ajoutés à la comparaison tournent en plus, sur exactement les mêmes données. Gemini ne regarde la vidéo qu'une fois. « Relancer les étapes 2 et 3 » réutilise la dernière vidéo analysée pour tester d'autres modèles sans repayer l'étape 1.</p>
     <p class="hint">Les listes viennent directement des fournisseurs et se mettent à jour toutes seules chaque semaine (ou avec le bouton). « Autre… » permet de saisir un nom de modèle à la main. Langue de la synthèse : français.</p>
 
     <div class="row" style="margin-top:.4rem">
       <button class="primary" id="aiOne">Analyser la vidéo chargée</button>
       <button class="primary" id="aiQueue">Analyser toute la file</button>
+      <button id="aiRerun" disabled title="Réutilise la transcription et les captures de la dernière analyse, sans repasser par Gemini">Relancer les étapes 2 et 3</button>
       <button id="aiStop" disabled>Arrêter</button>
     </div>
     <ol class="ailog" id="aiLog"></ol>
@@ -871,7 +882,8 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   const A = {
     toggle: $("aiToggle"), panel: $("aiPanel"), kGoogle: $("kGoogle"), kAnthropic: $("kAnthropic"), kOpenai: $("kOpenai"),
     kRemember: $("kRemember"), mRefresh: $("mRefresh"), mInfo: $("mInfo"), keysBox: $("keysBox"), m1: $("m1"), m1res: $("m1res"), maxShots: $("maxShots"),
-    p2: $("p2"), m2: $("m2"), p3: $("p3"), m3: $("m3"), one: $("aiOne"), all: $("aiQueue"), stop: $("aiStop"), log: $("aiLog")
+    p2: $("p2"), m2: $("m2"), p3: $("p3"), m3: $("m3"), one: $("aiOne"), all: $("aiQueue"), stop: $("aiStop"), log: $("aiLog"),
+    add2: $("add2"), add3: $("add3"), cmp2: $("cmp2"), cmp3: $("cmp3"), rerun: $("aiRerun")
   };
   let aiRunning = false, aiAbort = null;
   const DEFAULTS = {
@@ -971,7 +983,32 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   A.kRemember.onchange = saveKeys;
 
   function savePrefs() {
-    try { localStorage.setItem(PREFS, JSON.stringify({ m1: A.m1.value, m1res: A.m1res.value, maxShots: A.maxShots.value, p2: A.p2.value, m2: A.m2.value, p3: A.p3.value, m3: A.m3.value })); } catch (e) {}
+    try { localStorage.setItem(PREFS, JSON.stringify({ m1: A.m1.value, m1res: A.m1res.value, maxShots: A.maxShots.value, p2: A.p2.value, m2: A.m2.value, p3: A.p3.value, m3: A.m3.value, cmp })); } catch (e) {}
+  }
+  // ---------- comparison ----------
+  const PNAME = { google: "Google", anthropic: "Anthropic", openai: "OpenAI" };
+  let cmp = { 2: [], 3: [] };
+  function renderCmp(n) {
+    const ul = A["cmp" + n]; ul.textContent = "";
+    cmp[n].forEach((x, i) => {
+      const li = document.createElement("li");
+      const s = document.createElement("span"); s.textContent = PNAME[x.p] + " · " + x.m;
+      const b = document.createElement("button"); b.textContent = "×"; b.title = "Retirer de la comparaison"; b.setAttribute("aria-label", "Retirer " + x.m);
+      b.onclick = () => { cmp[n].splice(i, 1); renderCmp(n); savePrefs(); };
+      li.append(s, b); ul.appendChild(li);
+    });
+  }
+  function addCmp(n) {
+    const p = A["p" + n].value, m = A["m" + n].value.trim();
+    if (!m || m === "__custom__") return;
+    if (cmp[n].some(x => x.p === p && x.m === m)) { toast("Déjà dans la comparaison.", A.mInfo); return; }
+    cmp[n].push({ p, m }); renderCmp(n); savePrefs();
+  }
+  A.add2.onclick = () => addCmp(2);
+  A.add3.onclick = () => addCmp(3);
+  function runSet(n) {
+    const main = { p: A["p" + n].value, m: A["m" + n].value.trim() };
+    return [main].concat(cmp[n].filter(x => !(x.p === main.p && x.m === main.m)));
   }
   function saveKeys() {
     try {
@@ -984,6 +1021,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     try {
       p = JSON.parse(localStorage.getItem(PREFS) || "null");
       if (p) { ["m1res", "maxShots", "p2", "p3"].forEach(k => { if (p[k] != null) A[k].value = p[k]; }); }
+      if (p && p.cmp) { cmp = { 2: p.cmp[2] || [], 3: p.cmp[3] || [] }; renderCmp(2); renderCmp(3); }
       const k = JSON.parse(localStorage.getItem(KEYS) || "null");
       if (k) { A.kGoogle.value = k.g || ""; A.kAnthropic.value = k.a || ""; A.kOpenai.value = k.o || ""; A.kRemember.checked = true; }
     } catch (e) {}
@@ -1049,7 +1087,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       });
       if (!res.ok) throw await httpError(res, "Anthropic");
       const d = await res.json();
-      return { text: d.content.filter(c => c.type === "text").map(c => c.text).join("\n"), usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens" };
+      return { text: d.content.filter(c => c.type === "text").map(c => c.text).join("\n"), usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens", inTok: d.usage && d.usage.input_tokens, outTok: d.usage && d.usage.output_tokens };
     }
     if (provider === "openai") {
       const content = [{ type: "input_text", text }].concat(images.map(b64 => ({ type: "input_image", image_url: "data:image/jpeg;base64," + b64 })));
@@ -1061,7 +1099,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       if (!res.ok) throw await httpError(res, "OpenAI");
       const d = await res.json();
       const out = (d.output || []).flatMap(o => o.content || []).filter(c => c.type === "output_text").map(c => c.text).join("\n");
-      return { text: out, usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens" };
+      return { text: out, usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens", inTok: d.usage && d.usage.input_tokens, outTok: d.usage && d.usage.output_tokens };
     }
     // google
     const parts = images.map(b64 => ({ inline_data: { mime_type: "image/jpeg", data: b64 } })).concat([{ text }]);
@@ -1079,7 +1117,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     const cand = d.candidates && d.candidates[0];
     if (!cand || !cand.content) throw new Error("Gemini n'a pas renvoyé de réponse" + (d.promptFeedback ? " (" + JSON.stringify(d.promptFeedback).slice(0, 200) + ")" : "") + ".");
     const u = d.usageMetadata || {};
-    return { text: (cand.content.parts || []).map(p => p.text || "").join(""), usage: (u.promptTokenCount || "?") + " → " + ((u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0)) + " tokens", finish: cand.finishReason };
+    return { text: (cand.content.parts || []).map(p => p.text || "").join(""), usage: (u.promptTokenCount || "?") + " → " + ((u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0)) + " tokens", finish: cand.finishReason, inTok: u.promptTokenCount, outTok: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) };
   }
 
   // ---------- Gemini Files API (for .mp4 and local files) ----------
@@ -1199,9 +1237,9 @@ Règles :
   function excerpt(segs, t, before, after) {
     return segs.filter(s => s.t >= t - before && s.t <= t + after).map(s => "[" + fmt(s.t) + "] " + s.text).join("\n");
   }
-  async function analyseShots(list, segs, moments) {
+  async function analyseShots(list, segs, moments, provider, model) {
     const images = [];
-    for (const s of list) images.push(await blobToB64(await shrink(s.blob, 1568)));
+    for (const s of list) { if (!s.b64) s.b64 = await blobToB64(await shrink(s.blob, 1568)); images.push(s.b64); }
     const desc = list.map((s, i) => {
       const m = moments[i] || {};
       return `Capture ${i + 1} — fichier ${s.file} — à ${fmt(s.t)}\nRepérée pour : ${m.concept || "?"} — ${m.raison || ""}\nCe que dit le formateur autour de ce moment :\n${excerpt(segs, s.t, 45, 20) || "(rien)"}`;
@@ -1213,14 +1251,14 @@ ${desc}
 
 Pour chaque capture, décide si elle mérite d'être gardée comme exemple pédagogique (graphique lisible, concept clairement illustré, pas un doublon d'une capture meilleure). Réponds avec ce JSON :
 { "captures": [ { "numero": 1, "garder": true, "motif_rejet": "", "concepts": ["…"], "legende": "légende courte (max 12 mots)", "description_graphique": "ce que montre précisément le graphique : unité de temps si visible, zones tracées, structure, entrée, invalidation…", "enseignement": "ce que cet exemple apprend, relié aux paroles du formateur" } ] }`;
-    logAI("Analyse de " + list.length + " captures par " + A.m2.value.trim() + "…");
-    const r = await llm(A.p2.value, A.m2.value.trim(), { system, text, images }, { json: true, maxTokens: 16000 });
-    logAI("Captures analysées (" + r.usage + ").");
-    return parseJSON(r.text);
+    logAI("Analyse de " + list.length + " captures par " + model + "…");
+    const r = await llm(provider, model, { system, text, images }, { json: true, maxTokens: 16000 });
+    logAI("Captures analysées par " + model + " (" + r.usage + ").");
+    return { data: parseJSON(r.text), inTok: r.inTok, outTok: r.outTok };
   }
 
   // ---------- step 3: synthesis ----------
-  async function synthesise(title, url, segs, kept, resume) {
+  async function synthesise(title, url, segs, kept, resume, provider, model) {
     const system = "Tu es un formateur expert des concepts ICT (Inner Circle Trader). Tu écris en français, de façon précise, structurée et fidèle à la vidéo : tu n'inventes aucune règle que le formateur n'a pas donnée, et tu signales les points ambigus.";
     const caps = kept.map(k => `- ${k.file} (${fmt(k.t)}) — ${k.legende}\n  Graphique : ${k.description_graphique}\n  Enseignement : ${k.enseignement}`).join("\n");
     const text = `Vidéo : ${title}\nSource : ${url}\nRésumé rapide : ${resume || "—"}
@@ -1241,10 +1279,10 @@ Pour chaque capture retenue : image en Markdown ![légende](captures/fichier.jpg
 ## Points ambigus ou à vérifier
 
 Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de matière première pour les rédiger plus tard.`;
-    logAI("Rédaction de la synthèse par " + A.m3.value.trim() + "…");
-    const r = await llm(A.p3.value, A.m3.value.trim(), { system, text }, { maxTokens: 16000 });
-    logAI("Synthèse rédigée (" + r.usage + ").");
-    return r.text;
+    logAI("Rédaction de la synthèse par " + model + "…");
+    const r = await llm(provider, model, { system, text }, { maxTokens: 16000 });
+    logAI("Synthèse rédigée par " + model + " (" + r.usage + ").");
+    return { text: r.text, inTok: r.inTok, outTok: r.outTok };
   }
 
   // ---------- one video, end to end ----------
@@ -1276,50 +1314,108 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
     }
     logAI(list.length + " captures prises.");
 
-    let analysis = { captures: [] };
-    if (list.length) {
-      try { analysis = await analyseShots(list, segs, list.map(s => s.moment)); }
-      catch (e) { if (aiAbort.signal.aborted) throw e; logAI("Analyse des captures impossible : " + e.message + " — toutes les captures sont gardées.", "err"); }
-    }
+    lastRun = { src, title, url: videoUrl, segs, watch, shots: list.map(s => ({ blob: s.blob, b64: null, t: s.t, file: s.file, moment: s.moment })) };
+    await runSteps23(title, videoUrl, segs, watch, list);
+  }
+
+  // ---------- steps 2 & 3, with optional model comparison ----------
+  let lastRun = null;
+  function applyAnalysis(list, data) {
     list.forEach((s, i) => {
-      const a = (analysis.captures || []).find(c => Number(c.numero) === i + 1) || {};
-      s.ai = { garder: a.garder !== false, motif_rejet: a.motif_rejet || "", concepts: a.concepts || [], legende: a.legende || (s.moment.concept || ""), description_graphique: a.description_graphique || s.moment.raison || "", enseignement: a.enseignement || "" };
-      s.note = s.ai.legende; s.noteInput.value = s.note;
-      if (!s.ai.garder) { s.card.classList.add("rejected"); s.card.title = "Écartée : " + s.ai.motif_rejet; }
-      if (s.ai.garder) kept.push({ file: s.file, t: s.t, ...s.ai });
+      const a = ((data && data.captures) || []).find(c => Number(c.numero) === i + 1) || {};
+      s.ai = { garder: a.garder !== false, motif_rejet: a.motif_rejet || "", concepts: a.concepts || [], legende: a.legende || ((s.moment && s.moment.concept) || ""), description_graphique: a.description_graphique || (s.moment && s.moment.raison) || "", enseignement: a.enseignement || "" };
+      if (s.noteInput) { s.note = s.ai.legende; s.noteInput.value = s.note; }
+      if (s.card) { s.card.classList.toggle("rejected", !s.ai.garder); s.card.title = s.ai.garder ? "" : "Écartée : " + s.ai.motif_rejet; }
     });
-    if (list.length) logAI(kept.length + " captures retenues sur " + list.length + ".");
-    checkAbort();
+    return list.filter(s => s.ai.garder).map(s => ({ file: s.file, t: s.t, ...s.ai }));
+  }
+  async function runSteps23(title, url, segs, watch, list) {
+    const set2 = runSet(2), set3 = runSet(3), stats = [], analyses = [], syntheses = [];
+    let ref = null;
+    if (list.length) {
+      for (const x of set2) {
+        checkAbort(); const t0 = Date.now();
+        try {
+          const r = await analyseShots(list, segs, list.map(s => s.moment), x.p, x.m);
+          const keptN = ((r.data && r.data.captures) || []).filter(c => c.garder !== false).length;
+          analyses.push({ ...x, data: r.data });
+          stats.push({ step: 2, ...x, sec: (Date.now() - t0) / 1000, inTok: r.inTok, outTok: r.outTok, note: keptN + "/" + list.length + " captures retenues" });
+          if (!ref) ref = { ...x, data: r.data };
+        } catch (e) {
+          if (aiAbort.signal.aborted) throw e;
+          logAI("Analyse des captures par " + x.m + " impossible : " + e.message, "err");
+          analyses.push({ ...x, error: e.message });
+          stats.push({ step: 2, ...x, sec: (Date.now() - t0) / 1000, error: e.message });
+        }
+      }
+      if (!ref) logAI("Aucune analyse des captures n'a abouti : toutes les captures sont gardées.", "err");
+      else if (set2.length > 1 && ref.m !== set2[0].m) logAI("Le modèle de référence a échoué : " + ref.m + " sert de référence à sa place.", "err");
+    }
+    const kept = applyAnalysis(list, ref && ref.data);
+    if (list.length) logAI(kept.length + " captures retenues sur " + list.length + (set2.length > 1 ? " (selon " + (ref ? ref.m : "aucun modèle") + ")" : "") + ".");
 
-    let synthesis = "";
-    try { synthesis = await synthesise(title, videoUrl, segs, kept, watch.resume_court); }
-    catch (e) { if (aiAbort.signal.aborted) throw e; logAI("Synthèse impossible : " + e.message, "err"); synthesis = "# Synthèse indisponible\n\n" + e.message; }
-
-    await exportAI(title, segs, list, synthesis, watch, analysis);
+    for (const x of set3) {
+      checkAbort(); const t0 = Date.now();
+      try {
+        const r = await synthesise(title, url, segs, kept, watch.resume_court, x.p, x.m);
+        syntheses.push({ ...x, text: r.text });
+        stats.push({ step: 3, ...x, sec: (Date.now() - t0) / 1000, inTok: r.inTok, outTok: r.outTok, note: r.text.split(/\s+/).filter(Boolean).length + " mots" });
+      } catch (e) {
+        if (aiAbort.signal.aborted) throw e;
+        logAI("Synthèse par " + x.m + " impossible : " + e.message, "err");
+        syntheses.push({ ...x, error: e.message });
+        stats.push({ step: 3, ...x, sec: (Date.now() - t0) / 1000, error: e.message });
+      }
+    }
+    await exportAI(title, url, segs, list, watch, ref, analyses, syntheses, stats);
     logAI("✓ « " + title + " » terminé, .zip téléchargé.", "ok");
   }
 
-  async function exportAI(title, segs, list, synthesis, watch, analysis) {
-    const zip = new JSZip();
-    list.forEach(s => zip.file((s.ai && !s.ai.garder ? "captures-ecartees/" : "captures/") + s.file, s.blob));
+  function analysisMd(title, list, data, who) {
+    return "# Analyse des captures — " + title + (who ? "\n\nModèle : " + who : "") + "\n\n" + list.map((s, i) => {
+      const a = ((data && data.captures) || []).find(c => Number(c.numero) === i + 1) || {};
+      const keep = a.garder !== false, folder = s.ai && s.ai.garder === false ? "captures-ecartees" : "captures";
+      return `## ${s.file} · ${fmt(s.t)} · ${keep ? "retenue" : "écartée"}\n\n![](${folder}/${s.file})\n\n- **Légende** : ${a.legende || ""}\n- **Concepts** : ${(a.concepts || []).join(", ")}\n- **Graphique** : ${a.description_graphique || ""}\n- **Enseignement** : ${a.enseignement || ""}${keep ? "" : "\n- **Motif du rejet** : " + (a.motif_rejet || "")}\n`;
+    }).join("\n");
+  }
+  async function exportAI(title, url, segs, list, watch, ref, analyses, syntheses, stats) {
+    const zip = new JSZip(), compare = analyses.length > 1 || syntheses.length > 1;
+    list.forEach(s => zip.file((s.ai && s.ai.garder === false ? "captures-ecartees/" : "captures/") + s.file, s.blob));
     const keptN = list.filter(s => !s.ai || s.ai.garder).length;
+    const okSynth = syntheses.find(s => !s.error);
     zip.file("index.md", [
       "# " + title, "",
-      "- Vidéo : " + (videoUrl || "—"),
+      "- Vidéo : " + (url || "—"),
       "- Analysée le : " + new Date().toLocaleString("fr-FR"),
-      "- Modèles : vidéo " + A.m1.value + " · captures " + A.m2.value + " · synthèse " + A.m3.value,
+      "- Vidéo regardée par : " + A.m1.value,
+      "- Captures analysées par : " + (analyses.map(a => a.m).join(", ") || "—") + (ref ? " (référence : " + ref.m + ")" : ""),
+      "- Synthèse par : " + (syntheses.map(s => s.m).join(", ") || "—"),
       "- Captures : " + keptN + " retenues, " + (list.length - keptN) + " écartées", "",
-      "Fichiers : synthese.md (synthèse de la vidéo), analyse-captures.md, transcription.txt, captures/, captures-ecartees/, donnees-ia.json."
+      "Fichiers : synthese.md, analyse-captures.md, transcription.txt, captures/, captures-ecartees/, donnees-ia.json" + (compare ? ", comparaison.md et comparaison/ (un fichier par modèle)." : ".")
     ].join("\n"));
-    zip.file("synthese.md", synthesis);
+    zip.file("synthese.md", okSynth ? okSynth.text : "# Synthèse indisponible\n\n" + syntheses.map(s => s.m + " : " + s.error).join("\n"));
     zip.file("transcription.txt", segs.map(s => "[" + fmt(s.t) + "] " + s.text).join("\n") || "(aucune)");
-    zip.file("analyse-captures.md", "# Analyse des captures — " + title + "\n\n" + list.map(s => {
-      const a = s.ai || {};
-      return `## ${s.file} · ${fmt(s.t)} · ${a.garder === false ? "écartée" : "retenue"}\n\n![](${a.garder === false ? "captures-ecartees" : "captures"}/${s.file})\n\n- **Légende** : ${a.legende || ""}\n- **Concepts** : ${(a.concepts || []).join(", ")}\n- **Graphique** : ${a.description_graphique || ""}\n- **Enseignement** : ${a.enseignement || ""}${a.garder === false ? "\n- **Motif du rejet** : " + a.motif_rejet : ""}\n`;
-    }).join("\n"));
-    zip.file("donnees-ia.json", JSON.stringify({ video: watch, captures: analysis }, null, 2));
+    zip.file("analyse-captures.md", analysisMd(title, list, ref && ref.data, ref && ref.m));
+    zip.file("donnees-ia.json", JSON.stringify({ video: watch, analyses: analyses.map(a => ({ fournisseur: a.p, modele: a.m, resultat: a.data, erreur: a.error })) }, null, 2));
+    if (compare) {
+      const name = (x) => slug(PNAME[x.p] + "-" + x.m);
+      analyses.forEach(a => zip.file("comparaison/analyse-captures__" + name(a) + ".md", a.error ? "# Échec — " + a.m + "\n\n" + a.error : analysisMd(title, list, a.data, PNAME[a.p] + " · " + a.m).replace(/\]\((captures(?:-ecartees)?)\//g, "](../$1/")));
+      syntheses.forEach(s => zip.file("comparaison/synthese__" + name(s) + ".md", s.error ? "# Échec — " + s.m + "\n\n" + s.error : s.text.replace(/\]\((captures(?:-ecartees)?)\//g, "](../$1/")));
+      // capture-by-capture decisions side by side
+      const okA = analyses.filter(a => !a.error);
+      const grid = okA.length > 1 ? ["", "## Décisions capture par capture", "", "| Capture | " + okA.map(a => a.m).join(" | ") + " |", "|---|" + okA.map(() => "---|").join("")]
+        .concat(list.map((s, i) => "| " + s.file + " | " + okA.map(a => { const c = ((a.data && a.data.captures) || []).find(c => Number(c.numero) === i + 1); return c ? (c.garder === false ? "écartée" : "✓ " + (c.legende || "").replace(/\|/g, "/")) : "—"; }).join(" | ") + " |")) : [];
+      zip.file("comparaison.md", [
+        "# Comparaison des modèles — " + title, "",
+        "Toutes les analyses portent sur la même transcription et les mêmes captures. Les synthèses s'appuient toutes sur les captures retenues par le modèle de référence" + (ref ? " (" + ref.m + ")" : "") + ".", "",
+        "| Étape | Fournisseur | Modèle | Durée | Tokens entrée | Tokens sortie | Résultat |", "|---|---|---|---|---|---|---|"
+      ].concat(stats.map(s => "| " + (s.step === 2 ? "Captures" : "Synthèse") + " | " + PNAME[s.p] + " | " + s.m + " | " + s.sec.toFixed(0) + " s | " + (s.inTok ?? "?") + " | " + (s.outTok ?? "?") + " | " + (s.error ? "Échec : " + s.error.replace(/\|/g, "/").slice(0, 120) : s.note) + " |"))
+        .concat(["", "Pour estimer le coût, multipliez les tokens par le tarif de chaque modèle (prix par million de tokens indiqué par le fournisseur)."])
+        .concat(grid).join("\n"));
+    }
     const blob = await zip.generateAsync({ type: "blob" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = slug(title) + "-ia.zip";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = slug(title) + (compare ? "-ia-comparaison-" + new Date().toTimeString().slice(0, 5).replace(":", "h") : "-ia") + ".zip";
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
@@ -1327,13 +1423,19 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
   function needsTabCapture(srcs) { return srcs.some(s => !s.file); }
   function setAIBusy(on) {
     aiRunning = on;
-    A.one.disabled = on; A.all.disabled = on; A.stop.disabled = !on;
+    A.one.disabled = on; A.all.disabled = on; A.stop.disabled = !on; A.rerun.disabled = on || !lastRun;
     [E.start, E.load, E.url, E.file, E.qRun, E.qClear].forEach(b => b.disabled = on);
     setStatus(on ? "Analyse IA en cours" : "Prêt", on ? "on" : "");
   }
+  function checkKeys(withGoogle) {
+    try {
+      if (withGoogle) keyFor("google");
+      new Set(runSet(2).concat(runSet(3)).map(x => x.p)).forEach(p => keyFor(p));
+      return true;
+    } catch (e) { notice(e.message); A.keysBox.open = true; return false; }
+  }
   async function runAI(items) {
-    try { keyFor("google"); keyFor(A.p2.value); keyFor(A.p3.value); }
-    catch (e) { notice(e.message); A.keysBox.open = true; return; }
+    if (!checkKeys(true)) return;
     if (session) { toast("Terminez d'abord l'analyse en cours."); return; }
     notice(""); A.log.textContent = "";
     if (typeof JSZip === "undefined") { notice("La bibliothèque d'export n'a pas pu se charger. Vérifiez votre connexion."); return; }
@@ -1372,6 +1474,30 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
     runAI(items);
   };
   A.stop.onclick = () => { if (aiAbort) { aiAbort.abort(); logAI("Arrêt demandé…"); } };
+
+  A.rerun.onclick = async () => {
+    if (!lastRun) return;
+    if (session) { toast("Terminez d'abord l'analyse en cours."); return; }
+    if (!checkKeys(false)) return;
+    if (typeof JSZip === "undefined") { notice("La bibliothèque d'export n'a pas pu se charger. Vérifiez votre connexion."); return; }
+    notice(""); A.log.textContent = "";
+    aiAbort = new AbortController(); setAIBusy(true); A.rerun.disabled = true;
+    logAI("— « " + lastRun.title + " » : nouvelles étapes 2 et 3, sans repasser par Gemini —");
+    try {
+      clearResults();
+      lastRun.segs.forEach(s => addSegment({ t: s.t, text: s.text }));
+      const list = lastRun.shots.map(o => {
+        const shot = { id: ++seq, t: o.t, blob: o.blob, url: URL.createObjectURL(o.blob), note: "", auto: true, file: o.file, moment: o.moment, b64: o.b64 };
+        shots.push(shot); renderShot(shot); return shot;
+      });
+      updateCount();
+      await runSteps23(lastRun.title, lastRun.url, lastRun.segs, lastRun.watch, list);
+      list.forEach((s, i) => { lastRun.shots[i].b64 = s.b64; });
+    } catch (e) { logAI(e.message, "err"); }
+    const stopped = aiAbort.signal.aborted;
+    setAIBusy(false); A.rerun.disabled = false; lockUI(false); renderQueue();
+    setStatus(stopped ? "Analyse IA arrêtée" : "Analyse IA terminée", "done");
+  };
 
   window.addEventListener("beforeunload", (e) => { if (shots.length || segments.length) { e.preventDefault(); e.returnValue = ""; } });
   updateCount();
