@@ -1118,12 +1118,13 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   async function llm(provider, model, { system, text, images = [] }, { json = false, schema = null, maxTokens = 16000 } = {}) {
     const key = keyFor(provider), signal = aiAbort && aiAbort.signal;
     if (provider === "anthropic") {
-      const content = images.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })).concat([{ type: "text", text }]);
+      // forced tool_choice is refused by some recent models: "auto" + an explicit instruction, with a JSON-text fallback below
+      const content = images.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })).concat([{ type: "text", text: json ? text + "\n\nRéponds en appelant l'outil « repondre » avec ce JSON comme argument." : text }]);
       const res = await fetchRetry("https://api.anthropic.com/v1/messages", {
         method: "POST", signal,
         headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify(Object.assign({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] },
-          json ? { tools: [{ name: "repondre", description: "Enregistre la réponse structurée demandée.", input_schema: schema || { type: "object" } }], tool_choice: { type: "tool", name: "repondre" } } : {}))
+          json ? { tools: [{ name: "repondre", description: "Enregistre la réponse structurée demandée. Appelle toujours cet outil pour répondre.", input_schema: schema || { type: "object" } }], tool_choice: { type: "auto" } } : {}))
       });
       if (!res.ok) throw await httpError(res, "Anthropic");
       const d = await res.json();
