@@ -452,7 +452,8 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
         playerVars: { controls: 0, disablekb: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0, fs: 0, start: startAt, origin: location.origin },
         events: {
           onReady: ready,
-          onStateChange: onState,
+          onStateChange: (e) => { if (e.data === PS.PLAYING) hideCaptions(); onState(e); },
+          onApiChange: hideCaptions,   // fired when YouTube loads its captions module
           onError: (e) => loadFailed("Le lecteur YouTube a renvoyé l'erreur " + e.data + ". La vidéo est peut-être privée ou son intégration désactivée par son auteur.")
         }
       });
@@ -487,6 +488,14 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   function now() { try { return player.getCurrentTime() || 0; } catch (e) { return 0; } }
   function isPlaying() { try { return player.getPlayerState() === PS.PLAYING; } catch (e) { return false; } }
 
+  // The embedded player does not see the preference set on youtube.com (third-party cookies),
+  // so captions are switched off through the player API once its captions module is loaded.
+  function hideCaptions() {
+    if (!player || typeof player.setOption !== "function") return;
+    try { player.setOption("captions", "track", {}); } catch (e) {}
+    try { player.unloadModule("captions"); } catch (e) {}
+    try { player.unloadModule("cc"); } catch (e) {}
+  }
   function onState(e) {
     if (aiRunning) return;
     if (!session) return;
@@ -1246,8 +1255,7 @@ Règles :
     E.playerWrap.scrollIntoView({ block: "center" });
     try { player.mute(); } catch (e) {}
     if (!E.shield.classList.contains("on")) { E.shield.classList.add("on"); await sleep(3000); }   // let YouTube's hover controls fade out
-    try { player.setOption && player.setOption("captions", "track", {}); } catch (e) {}
-    try { player.unloadModule && player.unloadModule("captions"); player.unloadModule && player.unloadModule("cc"); } catch (e) {}
+    hideCaptions();
     // start ~3.5 s early: the play icon, title bar and gradient that YouTube shows on resume have time to fade out
     player.seekTo(Math.max(0, t - 3.5), true); player.playVideo();
     const t0 = Date.now();
