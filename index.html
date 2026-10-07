@@ -1069,9 +1069,22 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
     return new Promise(r => c.toBlob(r, "image/jpeg", 0.85));
   }
+  // Retries temporary errors (overload, rate limit) — not an exhausted quota
+  async function fetchRetry(url, opts) {
+    const who = url.includes("anthropic") ? "Anthropic" : url.includes("openai") ? "OpenAI" : "Gemini";
+    const waits = [5, 15, 40];
+    for (let i = 0; ; i++) {
+      const res = await fetch(url, opts);
+      if (res.ok || i >= waits.length || ![429, 500, 502, 503, 504, 529].includes(res.status)) return res;
+      let body = ""; try { body = await res.clone().text(); } catch (e) {}
+      if (res.status === 429 && /limit: 0|insufficient_quota|credit balance/i.test(body)) return res;   // no quota at all: retrying is useless
+      logAI(who + " : erreur " + res.status + " temporaire, nouvel essai dans " + waits[i] + " s…");
+      await sleep(waits[i] * 1000); checkAbort();
+    }
+  }
   async function httpError(res, who) {
     let detail = ""; try { const j = await res.json(); detail = (j.error && (j.error.message || j.error.type)) || JSON.stringify(j).slice(0, 300); } catch (e) {}
-    const hint = res.status === 401 || res.status === 403 ? " (clé refusée ?)" : res.status === 404 ? " (nom de modèle inconnu ?)" : res.status === 429 ? " (limite de requêtes ou de crédit atteinte)" : "";
+    const hint = res.status === 401 || res.status === 403 ? " (clé refusée ?)" : res.status === 404 ? " (nom de modèle inconnu ?)" : res.status === 429 ? (/free_tier|limit: 0/i.test(detail) ? " (ce modèle n'est pas inclus dans l'offre gratuite : activez la facturation sur votre projet Google)" : " (limite de requêtes ou de crédit atteinte)") : res.status === 503 || res.status === 529 ? " (modèle surchargé, réessayez plus tard)" : "";
     return new Error(who + " : erreur " + res.status + hint + (detail ? " — " + detail : ""));
   }
 
@@ -1080,7 +1093,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     const key = keyFor(provider), signal = aiAbort && aiAbort.signal;
     if (provider === "anthropic") {
       const content = images.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })).concat([{ type: "text", text }]);
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetchRetry("https://api.anthropic.com/v1/messages", {
         method: "POST", signal,
         headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] })
@@ -1093,7 +1106,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
       const content = [{ type: "input_text", text }].concat(images.map(b64 => ({ type: "input_image", image_url: "data:image/jpeg;base64," + b64 })));
       const body = { model, instructions: system, input: [{ role: "user", content }], max_output_tokens: Math.max(maxTokens, 32000) };
       if (json) body.text = { format: { type: "json_object" } };
-      const res = await fetch("https://api.openai.com/v1/responses", {
+      const res = await fetchRetry("https://api.openai.com/v1/responses", {
         method: "POST", signal, headers: { "content-type": "application/json", "authorization": "Bearer " + key }, body: JSON.stringify(body)
       });
       if (!res.ok) throw await httpError(res, "OpenAI");
@@ -1108,7 +1121,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     return gemini(model, { system_instruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts }], generationConfig: gen });
   }
   async function gemini(model, body) {
-    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
+    const res = await fetchRetry("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
       method: "POST", signal: aiAbort && aiAbort.signal,
       headers: { "content-type": "application/json", "x-goog-api-key": keyFor("google") }, body: JSON.stringify(body)
     });
@@ -1173,7 +1186,7 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
 }
 Règles :
 - "debut" et "t" sont des nombres de secondes depuis le début de la vidéo.
-- La transcription est fidèle et complète, dans la langue d'origine, découpée en segments de 1 à 3 phrases.
+- La transcription est MOT POUR MOT : tout ce qui est prononcé, du début à la fin, dans la langue d'origine, sans résumer, reformuler, corriger ni sauter de passage (un formateur dit en général 130 à 170 mots par minute). Découpe en segments de 1 à 3 phrases, avec un segment au moins toutes les 15 secondes de parole.
 - Choisis au maximum ${n} moments clés, uniquement quand un graphique illustre clairement un concept (zone tracée, annotation terminée, setup complet). Évite les plans sur le visage du formateur, les transitions et les doublons. Place "t" au moment où le tracé est terminé et bien visible.`;
 
   async function watchVideo(src, title) {
@@ -1213,10 +1226,11 @@ Règles :
     if (!vTrack) return null;
     E.playerWrap.scrollIntoView({ block: "center" });
     try { player.mute(); } catch (e) {}
-    player.seekTo(Math.max(0, t - 0.6), true); player.playVideo();
+    try { player.unloadModule && player.unloadModule("captions"); player.unloadModule && player.unloadModule("cc"); } catch (e) {}
+    // start ~3.5 s early: the play icon, title bar and gradient that YouTube shows on resume have time to fade out
+    player.seekTo(Math.max(0, t - 3.5), true); player.playVideo();
     const t0 = Date.now();
-    while (Date.now() - t0 < 9000) { await sleep(120); if (isPlaying() && now() >= t - 0.05) break; }
-    await sleep(250);
+    while (Date.now() - t0 < 12000) { await sleep(100); if (isPlaying() && now() >= t - 0.05) break; }
     const src = await grab();
     try { player.pauseVideo(); } catch (e) {}
     return src;
@@ -1286,7 +1300,20 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
   }
 
   // ---------- one video, end to end ----------
+  // Parses the text copied from YouTube's "Show transcript" panel
+  function parseYtTranscript(raw) {
+    const out = []; let cur = null;
+    const ts = /^\s*((?:\d{1,2}:)?\d{1,2}:\d{2})\s*(.*)$/;
+    String(raw || "").split(/\r?\n/).forEach(line => {
+      const l = line.trim(); if (!l) return;
+      const m = l.match(ts);
+      if (m) { cur = { t: toSec(m[1]), text: m[2].trim() }; out.push(cur); }
+      else if (cur && !/^\d+ (seconde|minute|heure)/i.test(l)) cur.text += (cur.text ? " " : "") + l;
+    });
+    return out.filter(s => isFinite(s.t) && s.text);
+  }
   async function analyseOne(src, name) {
+    const pasted = parseYtTranscript(E.ytTranscript.value);
     clearResults();
     const title0 = name || E.title.value.trim();
     if (!(playerReady && currentSource === src)) {
@@ -1298,7 +1325,17 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
     if (!E.title.value.trim() && watch.titre_propose) E.title.value = watch.titre_propose;
     const title = videoTitle();
 
-    const segs = (watch.transcription || []).map(s => ({ t: toSec(s.debut), text: String(s.texte || "").trim() })).filter(s => isFinite(s.t) && s.text);
+    let segs = (watch.transcription || []).map(s => ({ t: toSec(s.debut), text: String(s.texte || "").trim() })).filter(s => isFinite(s.t) && s.text);
+    if (pasted.length > 3) {
+      logAI("Transcription YouTube collée utilisée à la place de celle de Gemini (" + pasted.length + " segments).");
+      segs = pasted; E.ytTranscript.value = pasted.map(s => fmt(s.t) + " " + s.text).join("\n");
+      watch.transcription_source = "youtube";
+    } else {
+      watch.transcription_source = "gemini";
+      let dur = 0; try { dur = player.getDuration() || 0; } catch (e) {}
+      const words = segs.reduce((n, s) => n + s.text.split(/\s+/).length, 0);
+      if (dur > 120 && words / (dur / 60) < 90) logAI("Attention : la transcription de Gemini paraît incomplète (" + Math.round(words / (dur / 60)) + " mots par minute, contre 130 à 170 pour un discours normal). Gemini a sans doute résumé. Pour YouTube, collez la transcription officielle dans la section 4 et relancez.", "err");
+    }
     segs.forEach(s => addSegment(s));
     let moments = (watch.moments_cles || []).map(m => ({ ...m, t: toSec(m.t) })).filter(m => isFinite(m.t)).sort((a, b) => a.t - b.t);
     moments = moments.filter((m, i) => i === 0 || m.t - moments[i - 1].t > 3).slice(0, parseInt(A.maxShots.value, 10));
@@ -1389,11 +1426,13 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
       "- Analysée le : " + new Date().toLocaleString("fr-FR"),
       "- Vidéo regardée par : " + A.m1.value,
       "- Captures analysées par : " + (analyses.map(a => a.m).join(", ") || "—") + (ref ? " (référence : " + ref.m + ")" : ""),
-      "- Synthèse par : " + (syntheses.map(s => s.m).join(", ") || "—"),
+      "- Synthèse par : " + (syntheses.map(s => s.m).join(", ") || "—") + (okSynth ? " (synthese.md : " + okSynth.m + ")" : ""),
+      "- Transcription : " + (watch.transcription_source === "youtube" ? "officielle YouTube (collée)" : "Gemini"),
       "- Captures : " + keptN + " retenues, " + (list.length - keptN) + " écartées", "",
       "Fichiers : synthese.md, analyse-captures.md, transcription.txt, captures/, captures-ecartees/, donnees-ia.json" + (compare ? ", comparaison.md et comparaison/ (un fichier par modèle)." : ".")
     ].join("\n"));
-    zip.file("synthese.md", okSynth ? okSynth.text : "# Synthèse indisponible\n\n" + syntheses.map(s => s.m + " : " + s.error).join("\n"));
+    const refNote = okSynth && syntheses.length > 1 ? "> Synthèse rédigée par " + PNAME[okSynth.p] + " · " + okSynth.m + (syntheses[0] !== okSynth ? " (le modèle de référence " + syntheses[0].m + " a échoué)" : " (modèle de référence)") + ". Les autres versions sont dans comparaison/.\n\n" : "";
+    zip.file("synthese.md", okSynth ? refNote + okSynth.text : "# Synthèse indisponible\n\n" + syntheses.map(s => s.m + " : " + s.error).join("\n"));
     zip.file("transcription.txt", segs.map(s => "[" + fmt(s.t) + "] " + s.text).join("\n") || "(aucune)");
     zip.file("analyse-captures.md", analysisMd(title, list, ref && ref.data, ref && ref.m));
     zip.file("donnees-ia.json", JSON.stringify({ video: watch, analyses: analyses.map(a => ({ fournisseur: a.p, modele: a.m, resultat: a.data, erreur: a.error })) }, null, 2));
