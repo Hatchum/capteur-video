@@ -115,6 +115,10 @@ dialog::backdrop { background: rgba(10, 15, 22, .85); }
 .ailog li.err { color: var(--rec); }
 .ailog li.ok { font-weight: 700; }
 .shot.rejected { opacity: .45; }
+/* transparent layer over the YouTube player during analysis: the mouse no longer reaches it,
+   so YouTube hides its hover controls (title, pause icon, share buttons) instead of drawing them on the captures */
+.player-wrap .shield { position: absolute; inset: 0; z-index: 3; display: none; background: transparent; }
+.player-wrap .shield.on { display: block; }
 button.small { padding: .35rem .6rem; font-size: .9rem; align-self: flex-start; }
 .chips { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .3rem; }
 .chips:empty { display: none; }
@@ -173,6 +177,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     <div class="player-wrap" id="playerWrap">
       <div id="player"></div>
       <div class="player-empty" id="playerEmpty">La vidéo apparaîtra ici.</div>
+      <div class="shield" id="shield" aria-hidden="true"></div>
     </div>
     <div class="transport">
       <button class="primary" id="start" disabled>Démarrer l'analyse</button>
@@ -322,7 +327,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
 (function () {
   const $ = (id) => document.getElementById(id);
   const E = {
-    url: $("url"), load: $("load"), file: $("file"), title: $("title"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"),
+    url: $("url"), load: $("load"), file: $("file"), title: $("title"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"), shield: $("shield"),
     start: $("start"), pause: $("pause"), back: $("back"), fwd: $("fwd"), stop: $("stop"),
     time: $("time"), progress: $("progress"), lang: $("lang"), auto: $("auto"), sens: $("sens"),
     snap: $("snap"), snapInfo: $("snapInfo"), status: $("status"), statusText: $("statusText"), notice: $("notice"),
@@ -546,6 +551,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     setStatus("Analyse en cours", "on");
   }
   function lockUI(on) {
+    E.shield.classList.toggle("on", on || aiRunning);
     E.start.disabled = on || !playerReady; E.load.disabled = on; E.url.disabled = on; E.file.disabled = on; E.lang.disabled = on;
     E.qRun.disabled = on || !queue.some(q => q.status === "pending");
     [E.pause, E.back, E.fwd, E.stop, E.snap].forEach(b => b.disabled = !on);
@@ -1057,7 +1063,18 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     let t = String(text || "").replace(/```json|```/g, "").trim();
     const a = t.indexOf("{"), b = t.lastIndexOf("}");
     if (a > -1 && b > a) t = t.slice(a, b + 1);
-    return JSON.parse(t);
+    try { return JSON.parse(t); }
+    catch (e) {
+      // escape raw control characters that some models leave inside strings
+      let out = "", inStr = false, esc = false;
+      for (const ch of t) {
+        if (inStr && !esc && (ch === "\n" || ch === "\r" || ch === "\t")) { out += ch === "\n" ? "\\n" : ch === "\t" ? "\\t" : ""; continue; }
+        if (ch === '"' && !esc) inStr = !inStr;
+        esc = !esc && ch === "\\";
+        out += ch;
+      }
+      try { return JSON.parse(out); } catch (e2) { throw e; }
+    }
   }
   function blobToB64(blob) {
     return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("Lecture impossible")); r.readAsDataURL(blob); });
@@ -1089,18 +1106,20 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   }
 
   // ---------- generic LLM call (text + images) ----------
-  async function llm(provider, model, { system, text, images = [] }, { json = false, maxTokens = 16000 } = {}) {
+  async function llm(provider, model, { system, text, images = [] }, { json = false, schema = null, maxTokens = 16000 } = {}) {
     const key = keyFor(provider), signal = aiAbort && aiAbort.signal;
     if (provider === "anthropic") {
       const content = images.map(b64 => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } })).concat([{ type: "text", text }]);
       const res = await fetchRetry("https://api.anthropic.com/v1/messages", {
         method: "POST", signal,
         headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] })
+        body: JSON.stringify(Object.assign({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] },
+          json ? { tools: [{ name: "repondre", description: "Enregistre la réponse structurée demandée.", input_schema: schema || { type: "object" } }], tool_choice: { type: "tool", name: "repondre" } } : {}))
       });
       if (!res.ok) throw await httpError(res, "Anthropic");
       const d = await res.json();
-      return { text: d.content.filter(c => c.type === "text").map(c => c.text).join("\n"), usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens", inTok: d.usage && d.usage.input_tokens, outTok: d.usage && d.usage.output_tokens };
+      const tool = json && d.content.find(c => c.type === "tool_use");
+      return { text: tool ? JSON.stringify(tool.input) : d.content.filter(c => c.type === "text").map(c => c.text).join("\n"), usage: (d.usage ? d.usage.input_tokens + " → " + d.usage.output_tokens : "?") + " tokens", inTok: d.usage && d.usage.input_tokens, outTok: d.usage && d.usage.output_tokens };
     }
     if (provider === "openai") {
       const content = [{ type: "input_text", text }].concat(images.map(b64 => ({ type: "input_image", image_url: "data:image/jpeg;base64," + b64 })));
@@ -1226,6 +1245,8 @@ Règles :
     if (!vTrack) return null;
     E.playerWrap.scrollIntoView({ block: "center" });
     try { player.mute(); } catch (e) {}
+    if (!E.shield.classList.contains("on")) { E.shield.classList.add("on"); await sleep(3000); }   // let YouTube's hover controls fade out
+    try { player.setOption && player.setOption("captions", "track", {}); } catch (e) {}
     try { player.unloadModule && player.unloadModule("captions"); player.unloadModule && player.unloadModule("cc"); } catch (e) {}
     // start ~3.5 s early: the play icon, title bar and gradient that YouTube shows on resume have time to fade out
     player.seekTo(Math.max(0, t - 3.5), true); player.playVideo();
@@ -1266,9 +1287,27 @@ ${desc}
 Pour chaque capture, décide si elle mérite d'être gardée comme exemple pédagogique (graphique lisible, concept clairement illustré, pas un doublon d'une capture meilleure). Réponds avec ce JSON :
 { "captures": [ { "numero": 1, "garder": true, "motif_rejet": "", "concepts": ["…"], "legende": "légende courte (max 12 mots)", "description_graphique": "ce que montre précisément le graphique : unité de temps si visible, zones tracées, structure, entrée, invalidation…", "enseignement": "ce que cet exemple apprend, relié aux paroles du formateur" } ] }`;
     logAI("Analyse de " + list.length + " captures par " + model + "…");
-    const r = await llm(provider, model, { system, text, images }, { json: true, maxTokens: 16000 });
-    logAI("Captures analysées par " + model + " (" + r.usage + ").");
-    return { data: parseJSON(r.text), inTok: r.inTok, outTok: r.outTok };
+    const schema = {
+      type: "object", required: ["captures"],
+      properties: { captures: { type: "array", items: { type: "object", required: ["numero", "garder"],
+        properties: { numero: { type: "integer" }, garder: { type: "boolean" }, motif_rejet: { type: "string" }, concepts: { type: "array", items: { type: "string" } },
+          legende: { type: "string" }, description_graphique: { type: "string" }, enseignement: { type: "string" } } } } }
+    };
+    let inTok = 0, outTok = 0;
+    for (let attempt = 1; ; attempt++) {
+      const r = await llm(provider, model, { system, text, images }, { json: true, schema, maxTokens: 16000 });
+      inTok += r.inTok || 0; outTok += r.outTok || 0;
+      try {
+        const data = parseJSON(r.text);
+        if (!Array.isArray(data.captures)) throw new Error("champ « captures » absent");
+        logAI("Captures analysées par " + model + " (" + r.usage + ")" + (attempt > 1 ? " au 2e essai" : "") + ".");
+        return { data, inTok, outTok };
+      } catch (e) {
+        if (attempt >= 2) throw new Error("réponse illisible (JSON invalide) deux fois de suite : " + e.message);
+        logAI(model + " a renvoyé une réponse mal formée (" + e.message + "), nouvel essai…", "err");
+        checkAbort();
+      }
+    }
   }
 
   // ---------- step 3: synthesis ----------
@@ -1462,6 +1501,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
   function needsTabCapture(srcs) { return srcs.some(s => !s.file); }
   function setAIBusy(on) {
     aiRunning = on;
+    E.shield.classList.toggle("on", on || session);
     A.one.disabled = on; A.all.disabled = on; A.stop.disabled = !on; A.rerun.disabled = on || !lastRun;
     [E.start, E.load, E.url, E.file, E.qRun, E.qClear].forEach(b => b.disabled = on);
     setStatus(on ? "Analyse IA en cours" : "Prêt", on ? "on" : "");
