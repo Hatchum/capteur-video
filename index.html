@@ -95,6 +95,11 @@ input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: var(--btn); 
 dialog { border: none; padding: 0; background: transparent; max-width: 95vw; max-height: 92vh; }
 dialog img { max-width: 95vw; max-height: 92vh; display: block; border-radius: 6px; }
 dialog::backdrop { background: rgba(10, 15, 22, .85); }
+dialog.testdlg { background: var(--panel); color: var(--ink); border-radius: 12px; padding: 1.2rem; width: min(1100px, 95vw); max-height: 92vh; overflow: auto; }
+.testgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: .8rem; }
+.testgrid figure { margin: 0; }
+.testgrid img { width: 100%; display: block; border-radius: 6px; background: #000; }
+.testgrid figcaption { font-size: .92rem; margin-top: .35rem; }
 .toast { color: var(--muted); }
 .ai-toggle { font-weight: 700; border-color: var(--btn); }
 .ai-toggle[aria-expanded="true"] { background: var(--btn); color: var(--btn-ink); }
@@ -204,6 +209,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
         <select id="sens"><option value="12">Faible</option><option value="6" selected>Moyenne</option><option value="3">Forte</option></select>
       </label>
       <button id="snap" disabled>Capturer maintenant</button>
+      <button id="ytTest" title="Compare trois façons de capturer une vidéo YouTube pour repérer celle qui évite l'interface du lecteur">Tester la capture YouTube</button>
       <span class="toast" id="snapInfo"></span>
     </div>
     <p class="hint" style="margin-top:.8rem">Au démarrage, Chrome demande de partager cet onglet : laissez « Partager aussi l'audio de l'onglet » coché. Restez sur cet onglet pendant l'analyse. Pour les vidéos YouTube, gardez la vidéo entièrement visible à l'écran et ne passez pas la souris dessus ; pour les liens directs et les fichiers, vous pouvez faire défiler librement. L'audio est transcrit par le service de reconnaissance vocale du navigateur ; les captures restent sur votre ordinateur.</p>
@@ -274,6 +280,10 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   <section>
     <h2><span class="n">File d'attente ·</span> plusieurs vidéos à la suite <span class="n">(facultatif)</span></h2>
     <p class="hint">Un lien par ligne. Pour nommer une vidéo, ajoutez « | » puis le nom : <code>https://…/video.mp4 | Module 3 – Order blocks</code>. Chaque vidéo est analysée à son tour, son .zip se télécharge à la fin, puis captures et transcription sont remises à zéro avant la suivante. Au deuxième .zip, Chrome demandera d'autoriser les téléchargements multiples : acceptez.</p>
+    <div class="row" style="margin-bottom:.7rem">
+      <input type="url" id="plUrl" placeholder="Lien d'une playlist YouTube (…&list=PL…)" style="flex:1 1 360px">
+      <button id="plImport">Importer la playlist</button>
+    </div>
     <textarea id="qInput" style="min-height:90px" placeholder="https://…/video1.mp4 | Module 1 – Structure de marché&#10;https://…/video2.mp4 | Module 2 – Liquidité"></textarea>
     <div class="row" style="margin-top:.7rem">
       <button id="qAdd">Ajouter à la file</button>
@@ -322,6 +332,12 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
 </div>
 
 <dialog id="viewer"><img id="viewerImg" alt=""></dialog>
+<dialog id="ytTestDlg" class="testdlg">
+  <h2>Test de capture YouTube</h2>
+  <p class="hint">Regardez sur quelles images apparaissent le titre, le bouton pause ou les boutons du bas, puis indiquez-le à Claude (par exemple : « A et C sales, B propre »).</p>
+  <div class="testgrid" id="ytTestGrid"></div>
+  <div class="row" style="margin-top:.8rem"><button class="primary" id="ytTestClose">Fermer</button></div>
+</dialog>
 
 <script>
 (function () {
@@ -330,9 +346,10 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     url: $("url"), load: $("load"), file: $("file"), title: $("title"), playerWrap: $("playerWrap"), playerEmpty: $("playerEmpty"), shield: $("shield"),
     start: $("start"), pause: $("pause"), back: $("back"), fwd: $("fwd"), stop: $("stop"),
     time: $("time"), progress: $("progress"), lang: $("lang"), auto: $("auto"), sens: $("sens"),
-    snap: $("snap"), snapInfo: $("snapInfo"), status: $("status"), statusText: $("statusText"), notice: $("notice"),
+    snap: $("snap"), snapInfo: $("snapInfo"), ytTest: $("ytTest"), ytTestDlg: $("ytTestDlg"), ytTestGrid: $("ytTestGrid"), ytTestClose: $("ytTestClose"), status: $("status"), statusText: $("statusText"), notice: $("notice"),
     tscroll: $("tscroll"), tEmpty: $("tEmpty"), lines: $("lines"), interimRow: $("interimRow"), interimTime: $("interimTime"), interim: $("interim"),
     shots: $("shots"), sEmpty: $("sEmpty"), count: $("count"), ytTranscript: $("ytTranscript"),
+    plUrl: $("plUrl"), plImport: $("plImport"),
     qInput: $("qInput"), qAdd: $("qAdd"), qFiles: $("qFiles"), qClear: $("qClear"), qRun: $("qRun"), qList: $("qList"),
     exportBtn: $("export"), autoExport: $("autoExport"), reset: $("reset"), toast: $("toast"), viewer: $("viewer"), viewerImg: $("viewerImg")
   };
@@ -817,6 +834,47 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
   }
   function updateCount() { E.count.textContent = "(" + shots.length + ")"; E.sEmpty.hidden = shots.length > 0; }
   E.viewer.onclick = () => E.viewer.close();
+  E.ytTestClose.onclick = () => E.ytTestDlg.close();
+  E.ytTest.onclick = async () => {
+    if (!player || !playerReady || player.el) { toast("Chargez d'abord une vidéo YouTube.", E.snapInfo); return; }
+    if (aiRunning) { toast("Attendez la fin de l'analyse IA.", E.snapInfo); return; }
+    const own = !session;
+    if (own && !(await beginCapture())) return;
+    E.ytTest.disabled = true; E.shield.classList.add("on");
+    const shots = [];
+    const snapURL = async (label) => {
+      const src = await grab(); if (!src) { shots.push({ label: label + " — capture impossible" }); return; }
+      const [x, y, w, h] = region(src), c = document.createElement("canvas");
+      c.width = 960; c.height = Math.round(960 * h / w);
+      c.getContext("2d").drawImage(src, x, y, w, h, 0, 0, c.width, c.height);
+      shots.push({ label, url: c.toDataURL("image/jpeg", 0.85) });
+    };
+    const waitPlay = async (sec) => { const s = now(), t0 = Date.now(); while (Date.now() - t0 < sec * 1000 + 10000) { await sleep(100); if (isPlaying() && now() >= s + sec) break; } };
+    try {
+      toast("Test en cours (environ 20 s), ne touchez pas à la vidéo…", E.snapInfo);
+      E.playerWrap.scrollIntoView({ block: "center" });
+      try { player.mute(); } catch (e) {}
+      await sleep(1500); hideCaptions();
+      const t = Math.max(5, now());
+      player.seekTo(t, true); player.playVideo();
+      await waitPlay(1);   await snapURL("A · en lecture, 1 s après un saut dans la vidéo");
+      await waitPlay(6);   await snapURL("B · en lecture, 7 s après le saut (méthode actuelle)");
+      player.pauseVideo(); await sleep(2000); await snapURL("C · vidéo en pause");
+      player.playVideo();  await waitPlay(1.5); await snapURL("D · 1,5 s après la reprise de lecture");
+      player.pauseVideo();
+    } catch (e) { notice("Test de capture interrompu : " + e.message); }
+    E.ytTestGrid.textContent = "";
+    shots.forEach(s => {
+      const f = document.createElement("figure");
+      if (s.url) { const i = document.createElement("img"); i.src = s.url; i.alt = s.label; f.appendChild(i); }
+      const cap = document.createElement("figcaption"); cap.textContent = s.label; f.appendChild(cap);
+      E.ytTestGrid.appendChild(f);
+    });
+    E.ytTestDlg.showModal();
+    if (own) finish(false);
+    E.shield.classList.toggle("on", session || aiRunning);
+    E.ytTest.disabled = false;
+  };
   E.snap.onclick = async () => { const src = await grab(); if (src) await takeShot(src, signature(src), false); };
 
   async function tick() {
@@ -1216,7 +1274,7 @@ Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, de la forme :
 Règles :
 - "debut" et "t" sont des nombres de secondes depuis le début de la vidéo.
 - La transcription est MOT POUR MOT : tout ce qui est prononcé, du début à la fin, dans la langue d'origine, sans résumer, reformuler, corriger ni sauter de passage (un formateur dit en général 130 à 170 mots par minute). Découpe en segments de 1 à 3 phrases, avec un segment au moins toutes les 15 secondes de parole.
-- Choisis au maximum ${n} moments clés, uniquement quand un graphique illustre clairement un concept (zone tracée, annotation terminée, setup complet). Évite les plans sur le visage du formateur, les transitions et les doublons. Place "t" au moment où le tracé est terminé et bien visible.`;
+- Choisis au maximum ${n} moments clés, RÉPARTIS SUR TOUTE LA DURÉE de la vidéo (au moins un par grande partie, y compris les schémas explicatifs du début), uniquement quand l'écran illustre clairement un concept (zone tracée, annotation terminée, setup complet). Évite les plans sur le visage du formateur, les transitions et les doublons. Place "t" au moment où le tracé est terminé et bien visible.`;
 
   async function watchVideo(src, title) {
     let part, uploaded = null;
@@ -1257,14 +1315,16 @@ Règles :
     try { player.mute(); } catch (e) {}
     if (!E.shield.classList.contains("on")) { E.shield.classList.add("on"); await sleep(3000); }   // let YouTube's hover controls fade out
     hideCaptions();
-    // start ~3.5 s early: the play icon, title bar and gradient that YouTube shows on resume have time to fade out
-    player.seekTo(Math.max(0, t - 3.5), true); player.playVideo();
-    const t0 = Date.now();
-    while (Date.now() - t0 < 12000) { await sleep(100); if (isPlaying() && now() >= t - 0.05) break; }
-    const src = await grab();
-    try { player.pauseVideo(); } catch (e) {}
-    return src;
+    // YouTube shows its controls (title, pause icon, buttons) after every seek, pause or resume.
+    // So the video keeps playing from one moment to the next, and only jumps when the gap is long,
+    // landing 6 s early so the controls have time to fade out.
+    const cur = now();
+    if (!isPlaying() || t < cur - 0.5 || t - cur > 25) { player.seekTo(Math.max(0, t - 6), true); player.playVideo(); }
+    const t0 = Date.now(), limit = 15000 + Math.max(0, t - cur) * 1000;
+    while (Date.now() - t0 < limit) { await sleep(100); if (isPlaying() && now() >= t - 0.05) break; }
+    return await grab();   // no pause here: the next capture continues the same playback
   }
+  function stopAfterCaptures() { if (!(player && player.el)) { try { player.pauseVideo(); } catch (e) {} } }
   async function shotFrom(src, t) {
     const [x, y, w, h] = region(src);
     const scale = Math.min(1, 1920 / w);
@@ -1397,6 +1457,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
       const s = await shotFrom(src2, moments[i].t);
       if (s) { s.moment = moments[i]; s.file = String(list.length + 1).padStart(3, "0") + "_" + fmt(s.t, "-") + ".jpg"; s.noteInput.value = s.note = moments[i].concept || ""; list.push(s); }
     }
+    stopAfterCaptures();
     logAI(list.length + " captures prises.");
 
     lastRun = { src, title, url: videoUrl, segs, watch, shots: list.map(s => ({ blob: s.blob, b64: null, t: s.t, file: s.file, moment: s.moment })) };
@@ -1562,6 +1623,45 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
     runAI(items);
   };
   A.stop.onclick = () => { if (aiAbort) { aiAbort.abort(); logAI("Arrêt demandé…"); } };
+
+  // ---------- YouTube playlist import (YouTube Data API v3, with the Google key) ----------
+  E.plImport.onclick = async () => {
+    let listId = "";
+    try { listId = new URL(E.plUrl.value.trim()).searchParams.get("list") || ""; } catch (e) {}
+    if (!listId && /^[\w-]{12,}$/.test(E.plUrl.value.trim())) listId = E.plUrl.value.trim();
+    if (!listId) { notice("Lien de playlist non reconnu : il doit contenir « list=… » (ouvrez la playlist sur YouTube et copiez l'adresse)."); return; }
+    const key = A.kGoogle.value.trim();
+    if (!key) { notice("L'import utilise votre clé Google : renseignez-la dans ✨ Mode IA › Clés API."); A.panel.hidden = false; A.toggle.setAttribute("aria-expanded", "true"); A.keysBox.open = true; return; }
+    notice(""); E.plImport.disabled = true; toast("Lecture de la playlist…");
+    const items = []; let token = "";
+    try {
+      do {
+        const r = await fetch("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails,status&maxResults=50&playlistId=" + encodeURIComponent(listId) + (token ? "&pageToken=" + encodeURIComponent(token) : "") + "&key=" + encodeURIComponent(key));
+        if (!r.ok) {
+          let msg = ""; try { const j = await r.json(); msg = (j.error && j.error.message) || ""; } catch (e) {}
+          if (r.status === 403 && /not been used|disabled|blocked/i.test(msg)) throw new Error("l'API « YouTube Data API v3 » n'est pas activée pour votre clé Google. Ouvrez console.cloud.google.com, sélectionnez le projet de votre clé, cherchez « YouTube Data API v3 » et cliquez sur « Activer », puis réessayez dans une minute. Si votre clé est restreinte, ajoutez aussi cette API à ses restrictions.");
+          if (r.status === 404) throw new Error("playlist introuvable. Elle doit être publique ou non répertoriée.");
+          throw new Error("erreur " + r.status + (msg ? " — " + msg : ""));
+        }
+        const d = await r.json(); token = d.nextPageToken || "";
+        (d.items || []).forEach(it => {
+          const id = it.contentDetails && it.contentDetails.videoId, title = (it.snippet && it.snippet.title) || "";
+          const privacy = it.status && it.status.privacyStatus;
+          if (id && privacy !== "private" && privacy !== "privacyStatusUnspecified" && !/^(Private|Deleted) video$/i.test(title)) items.push({ id, title, pos: (it.snippet.position ?? items.length) + 1 });
+        });
+      } while (token);
+    } catch (e) { notice("Import de la playlist impossible : " + e.message); E.plImport.disabled = false; return; }
+    const known = new Set(queue.map(q => { const p = q.url && parseId(q.url); return p && p.id; }).filter(Boolean));
+    let added = 0;
+    items.forEach(it => {
+      if (known.has(it.id)) return;
+      queue.push({ id: ++qSeq, url: "https://www.youtube.com/watch?v=" + it.id, name: String(it.pos).padStart(2, "0") + " – " + it.title, status: "pending" });
+      known.add(it.id); added++;
+    });
+    renderQueue(); E.plImport.disabled = false;
+    toast(added + " vidéo(s) ajoutée(s) à la file" + (items.length - added ? ", " + (items.length - added) + " déjà présente(s)" : "") + ".");
+    E.qList.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
   A.rerun.onclick = async () => {
     if (!lastRun) return;
