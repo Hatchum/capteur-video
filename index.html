@@ -243,7 +243,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
           <select id="m1res"><option value="MEDIA_RESOLUTION_LOW" selected>Basse (économique)</option><option value="">Standard</option></select>
         </label>
         <label class="field"><span>Captures maximum par vidéo</span>
-          <select id="maxShots"><option>10</option><option selected>15</option><option>20</option><option>25</option></select>
+          <select id="maxShots"><option value="auto" selected>Automatique (≈ 1 par minute)</option><option>10</option><option>15</option><option>20</option><option>30</option><option>40</option><option>60</option></select>
         </label>
       </div>
       <div class="step">
@@ -1112,6 +1112,7 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     const t = document.createElement("time"); t.textContent = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     const s = document.createElement("span"); s.textContent = msg;
     li.append(t, s); A.log.appendChild(li); A.log.scrollTop = A.log.scrollHeight;
+    return s;
   }
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   function checkAbort() { if (aiAbort && aiAbort.signal.aborted) throw new Error("Analyse arrêtée."); }
@@ -1231,14 +1232,35 @@ code { font-size: .9em; background: var(--bg); padding: .05rem .3rem; border-rad
     if (!start.ok) throw await httpError(start, "Gemini (envoi)");
     const upUrl = start.headers.get("x-goog-upload-url");
     if (!upUrl) throw new Error("Gemini n'a pas fourni d'adresse d'envoi pour la vidéo.");
-    const up = await fetch(upUrl, { method: "POST", signal: aiAbort && aiAbort.signal, headers: { "X-Goog-Upload-Offset": "0", "X-Goog-Upload-Command": "upload, finalize" }, body: blob });
-    if (!up.ok) throw await httpError(up, "Gemini (envoi)");
-    let file = (await up.json()).file;
-    const t0 = Date.now();
+    // XMLHttpRequest rather than fetch: it reports upload progress, shown live in the log
+    const mo = (n) => Math.round(n / 1048576);
+    const line = logAI("Envoi à Gemini : 0 / " + mo(blob.size) + " Mo…");
+    const tUp = Date.now();
+    const upText = await new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open("POST", upUrl);
+      x.setRequestHeader("X-Goog-Upload-Offset", "0");
+      x.setRequestHeader("X-Goog-Upload-Command", "upload, finalize");
+      x.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const sec = (Date.now() - tUp) / 1000, rate = e.loaded / Math.max(sec, 1);
+        const left = rate > 0 ? Math.round((e.total - e.loaded) / rate / 60) : "?";
+        line.textContent = "Envoi à Gemini : " + mo(e.loaded) + " / " + mo(e.total) + " Mo (" + Math.round(100 * e.loaded / e.total) + " %, " + (rate / 1048576).toFixed(1) + " Mo/s, encore ~" + left + " min)";
+      };
+      x.onload = () => (x.status >= 200 && x.status < 300) ? resolve(x.responseText) : reject(new Error("Gemini (envoi) : erreur " + x.status + " — " + String(x.responseText).slice(0, 200)));
+      x.onerror = () => reject(new Error("Gemini (envoi) : connexion interrompue pendant l'envoi de la vidéo."));
+      x.onabort = () => reject(new Error("Analyse arrêtée."));
+      if (aiAbort) aiAbort.signal.addEventListener("abort", () => x.abort(), { once: true });
+      x.send(blob);
+    });
+    line.textContent = "Vidéo envoyée à Gemini (" + mo(blob.size) + " Mo en " + Math.round((Date.now() - tUp) / 60000) + " min).";
+    let file = JSON.parse(upText).file;
+    const t0 = Date.now(), prep = logAI("Préparation de la vidéo par Gemini…");
     while (file.state === "PROCESSING") {
       checkAbort();
-      if (Date.now() - t0 > 15 * 60 * 1000) throw new Error("Gemini met trop de temps à préparer la vidéo.");
-      await sleep(4000);
+      if (Date.now() - t0 > 30 * 60 * 1000) throw new Error("Gemini met plus de 30 minutes à préparer la vidéo.");
+      await sleep(5000);
+      prep.textContent = "Préparation de la vidéo par Gemini… (" + Math.floor((Date.now() - t0) / 60000) + " min " + Math.round(((Date.now() - t0) / 1000) % 60) + " s)";
       const r = await fetch("https://generativelanguage.googleapis.com/v1beta/" + file.name, { headers: { "x-goog-api-key": key }, signal: aiAbort && aiAbort.signal });
       if (!r.ok) throw await httpError(r, "Gemini (préparation)");
       file = await r.json();
@@ -1276,6 +1298,12 @@ Règles :
 - La transcription est MOT POUR MOT : tout ce qui est prononcé, du début à la fin, dans la langue d'origine, sans résumer, reformuler, corriger ni sauter de passage (un formateur dit en général 130 à 170 mots par minute). Découpe en segments de 1 à 3 phrases, avec un segment au moins toutes les 15 secondes de parole.
 - Choisis au maximum ${n} moments clés, RÉPARTIS SUR TOUTE LA DURÉE de la vidéo (au moins un par grande partie, y compris les schémas explicatifs du début), uniquement quand l'écran illustre clairement un concept (zone tracée, annotation terminée, setup complet). Évite les plans sur le visage du formateur, les transitions et les doublons. Place "t" au moment où le tracé est terminé et bien visible.`;
 
+  // "Automatique": about one capture per minute of video, between 10 and 60
+  function maxShots() {
+    if (A.maxShots.value !== "auto") return parseInt(A.maxShots.value, 10);
+    let dur = 0; try { dur = player.getDuration() || 0; } catch (e) {}
+    return Math.max(10, Math.min(60, Math.round(dur / 60) || 15));
+  }
   async function watchVideo(src, title) {
     let part, uploaded = null;
     const raw = (src.url || "").trim();
@@ -1285,18 +1313,21 @@ Règles :
     } else {
       logAI("Récupération de la vidéo…");
       const blob = await videoBlob(src); checkAbort();
-      logAI("Envoi à Gemini (" + Math.round(blob.size / 1048576) + " Mo), puis préparation…");
+      if (blob.size > 2 * 1024 * 1048576) throw new Error("Vidéo de " + Math.round(blob.size / 1048576) + " Mo : Gemini accepte au plus 2 Go par fichier. Compressez-la d'abord, par exemple avec HandBrake en 720p.");
       uploaded = await uploadToGemini(blob, title || "video");
       part = { file_data: { file_uri: uploaded.uri, mime_type: uploaded.mimeType || "video/mp4" } };
       logAI("Gemini regarde la vidéo…");
     }
     const gen = { responseMimeType: "application/json", maxOutputTokens: 65536 };
     if (A.m1res.value) gen.mediaResolution = A.m1res.value;
+    const tWatch = Date.now();
     try {
-      const r = await gemini(A.m1.value.trim(), { contents: [{ role: "user", parts: [part, { text: WATCH_PROMPT(parseInt(A.maxShots.value, 10)) }] }], generationConfig: gen });
+      const r = await gemini(A.m1.value.trim(), { contents: [{ role: "user", parts: [part, { text: WATCH_PROMPT(maxShots()) }] }], generationConfig: gen });
       logAI("Analyse vidéo terminée (" + r.usage + ").");
       if (r.finish === "MAX_TOKENS") logAI("Réponse tronquée : vidéo trop longue pour une seule passe.", "err");
-      return parseJSON(r.text);
+      const out = parseJSON(r.text);
+      out._usage = { m: A.m1.value.trim(), sec: (Date.now() - tWatch) / 1000, inTok: r.inTok, outTok: r.outTok };
+      return out;
     } finally { if (uploaded) deleteGeminiFile(uploaded); }
   }
 
@@ -1446,7 +1477,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
     }
     segs.forEach(s => addSegment(s));
     let moments = (watch.moments_cles || []).map(m => ({ ...m, t: toSec(m.t) })).filter(m => isFinite(m.t)).sort((a, b) => a.t - b.t);
-    moments = moments.filter((m, i) => i === 0 || m.t - moments[i - 1].t > 3).slice(0, parseInt(A.maxShots.value, 10));
+    moments = moments.filter((m, i) => i === 0 || m.t - moments[i - 1].t > 3).slice(0, maxShots());
     logAI(segs.length + " segments transcrits, " + moments.length + " moments clés repérés.");
 
     const list = [], kept = [];
@@ -1477,6 +1508,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
   }
   async function runSteps23(title, url, segs, watch, list) {
     const set2 = runSet(2), set3 = runSet(3), stats = [], analyses = [], syntheses = [];
+    if (watch._usage) stats.push({ step: 1, p: "google", m: watch._usage.m, sec: watch._usage.sec, inTok: watch._usage.inTok, outTok: watch._usage.outTok, note: (watch.moments_cles || []).length + " moments clés, transcription " + (watch.transcription_source === "youtube" ? "YouTube collée" : "Gemini") });
     let ref = null;
     if (list.length) {
       for (const x of set2) {
@@ -1533,7 +1565,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
       "# " + title, "",
       "- Vidéo : " + (url || "—"),
       "- Analysée le : " + new Date().toLocaleString("fr-FR"),
-      "- Vidéo regardée par : " + A.m1.value,
+      "- Vidéo regardée par : " + ((watch._usage && watch._usage.m) || A.m1.value) + (watch._usage ? " (" + (watch._usage.inTok ?? "?") + " tokens en entrée, " + (watch._usage.outTok ?? "?") + " en sortie)" : ""),
       "- Captures analysées par : " + (analyses.map(a => a.m).join(", ") || "—") + (ref ? " (référence : " + ref.m + ")" : ""),
       "- Synthèse par : " + (syntheses.map(s => s.m).join(", ") || "—") + (okSynth ? " (synthese.md : " + okSynth.m + ")" : ""),
       "- Transcription : " + (watch.transcription_source === "youtube" ? "officielle YouTube (collée)" : "Gemini"),
@@ -1557,7 +1589,7 @@ Ne rédige pas de skill ni de fichier SKILL.md : cette synthèse servira de mati
         "# Comparaison des modèles — " + title, "",
         "Toutes les analyses portent sur la même transcription et les mêmes captures. Les synthèses s'appuient toutes sur les captures retenues par le modèle de référence" + (ref ? " (" + ref.m + ")" : "") + ".", "",
         "| Étape | Fournisseur | Modèle | Durée | Tokens entrée | Tokens sortie | Résultat |", "|---|---|---|---|---|---|---|"
-      ].concat(stats.map(s => "| " + (s.step === 2 ? "Captures" : "Synthèse") + " | " + PNAME[s.p] + " | " + s.m + " | " + s.sec.toFixed(0) + " s | " + (s.inTok ?? "?") + " | " + (s.outTok ?? "?") + " | " + (s.error ? "Échec : " + s.error.replace(/\|/g, "/").slice(0, 120) : s.note) + " |"))
+      ].concat(stats.map(s => "| " + (s.step === 1 ? "Vidéo" : s.step === 2 ? "Captures" : "Synthèse") + " | " + PNAME[s.p] + " | " + s.m + " | " + s.sec.toFixed(0) + " s | " + (s.inTok ?? "?") + " | " + (s.outTok ?? "?") + " | " + (s.error ? "Échec : " + s.error.replace(/\|/g, "/").slice(0, 120) : s.note) + " |"))
         .concat(["", "Pour estimer le coût, multipliez les tokens par le tarif de chaque modèle (prix par million de tokens indiqué par le fournisseur)."])
         .concat(grid).join("\n"));
     }
